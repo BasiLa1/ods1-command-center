@@ -360,8 +360,7 @@ def build_discord_briefing(df: pd.DataFrame, phase_mode: str) -> str:
         f"**Kick Candidates ({len(kick_list)}):** " + (", ".join(kick_list) if kick_list else "None"),
         f"**Top Rotated Active in KD 4161:** " + (", ".join(rot_list) if rot_list else "None"),
     ]
-    return "
-".join(lines)
+    return "\n".join(lines)
 
 
 if "state" not in st.session_state:
