@@ -275,6 +275,7 @@ def load_persistent_state() -> dict:
         "excused_ids": [],
         "notes": {},
         "snapshots": [],
+        "movement_log": [],
     }
     if os.path.exists(STATE_PATH):
         try:
@@ -292,10 +293,17 @@ def save_persistent_state(state: dict) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
+def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) -> tuple:
+    """
+    Combines All-Time ODS1 exports + Current 7-Day ODS1 exports + KD 4161 KvK PlayersRanking.
+    Automatically detects who is currently in the alliance vs. who rotated out or left,
+    and logs joins/returns and leaves.
+    """
     by_id = {int(r["id"]): dict(r) for r in base_records}
+    prev_active_ids = {gid for gid, rec in by_id.items() if rec.get("in_active_126", False)}
 
-    alliance_dfs = []
+    alliance_7d_dfs = []
+    alliance_alltime_dfs = []
     kvk_dfs = []
 
     for uf in uploaded_files:
@@ -309,16 +317,19 @@ def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
 
         cols = set(df.columns)
         if "Alliance helps" in cols and "Forts destroyed" in cols:
-            alliance_dfs.append((uf.name, df))
+            # Distinguish All-Time export from Current/7-Day export:
+            # All-Time exports have >165 rows (historical members) or much higher average forts (>150)
+            avg_forts = df["Forts destroyed"].mean() if "Forts destroyed" in df.columns else 0
+            is_alltime = (len(df) > 165) or (avg_forts > 130)
+            if is_alltime:
+                alliance_alltime_dfs.append((uf.name, df))
+            else:
+                alliance_7d_dfs.append((uf.name, df))
         elif "Governor ID" in cols and ("DKP" in cols or "KP" in cols):
             kvk_dfs.append((uf.name, df))
 
-    for _, df in alliance_dfs:
-        is_alltime = len(df) > 180 or (
-            "Usefulness Score" in df.columns
-            and "Activity points" not in df.columns
-            and len(df) >= 200
-        )
+    # 1. Process All-Time ODS1 files first (updates historical totals & adds any missing historical members)
+    for _, df in alliance_alltime_dfs:
         for _, row in df.iterrows():
             raw_id = row.get("ID")
             if pd.isna(raw_id):
@@ -329,10 +340,10 @@ def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
                     "id": gov_id,
                     "name": str(row.get("Player", f"Gov-{gov_id}")).strip(),
                     "aliases": [],
-                    "status": "Active in ODS1",
-                    "in_active_126": True,
+                    "status": "Departed / Inactive",
+                    "in_active_126": False,
                     "in_kvk_4161": False,
-                    "is_new_joiner": True,
+                    "is_new_joiner": False,
                     "power": float(row.get("Power", 0) or 0),
                     "forts_7d": 0,
                     "forts_all": 0,
@@ -370,25 +381,118 @@ def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
                 rec["aliases"] = sorted(list(aliases))
                 rec["name"] = p_name
 
-            if is_alltime:
-                rec["forts_all"] = int(row.get("Forts destroyed", rec["forts_all"]) or 0)
-                rec["tech_all"] = int(row.get("Technology points", rec["tech_all"]) or 0)
-                rec["helps_all"] = int(row.get("Alliance helps", rec["helps_all"]) or 0)
-                rec["rss_all"] = int(row.get("Resource assistance", rec["rss_all"]) or 0)
-                rec["build_all"] = int(row.get("Building time (seconds)", rec["build_all"]) or 0)
-                if "Usefulness Score" in row and pd.notna(row["Usefulness Score"]):
-                    rec["rok_use_all"] = int(row["Usefulness Score"])
-                if pd.notna(row.get("Last login")):
-                    rec["last_login"] = str(row["Last login"])
-            else:
+            rec["forts_all"] = int(row.get("Forts destroyed", rec.get("forts_all", 0)) or 0)
+            rec["tech_all"] = int(row.get("Technology points", rec.get("tech_all", 0)) or 0)
+            rec["helps_all"] = int(row.get("Alliance helps", rec.get("helps_all", 0)) or 0)
+            rec["rss_all"] = int(row.get("Resource assistance", rec.get("rss_all", 0)) or 0)
+            rec["build_all"] = int(row.get("Building time (seconds)", rec.get("build_all", 0)) or 0)
+            if "Usefulness Score" in row and pd.notna(row["Usefulness Score"]):
+                rec["rok_use_all"] = int(row["Usefulness Score"])
+            if not rec.get("in_active_126") and pd.notna(row.get("Power")):
+                rec["power"] = float(row["Power"])
+            if pd.notna(row.get("Last login")):
+                rec["last_login"] = str(row["Last login"])
+
+    # 2. Process Current / 7-Day Alliance files (resets active flags so rotated/departed members are accurately detected!)
+    joined_names = []
+    left_names = []
+
+    if alliance_7d_dfs:
+        new_active_ids = set()
+        for _, df in alliance_7d_dfs:
+            for _, row in df.iterrows():
+                raw_id = row.get("ID")
+                if pd.isna(raw_id):
+                    continue
+                new_active_ids.add(int(raw_id))
+
+        # Mark anyone NOT in today's current 7d scan as rotated/departed and zero out their 7d stats
+        for gid, rec in by_id.items():
+            if gid not in new_active_ids:
+                if gid in prev_active_ids:
+                    left_names.append(f"{rec.get('name', gid)} ({gid})")
+                rec["in_active_126"] = False
+                rec["forts_7d"] = 0
+                rec["tech_7d"] = 0
+                rec["helps_7d"] = 0
+                rec["rss_7d"] = 0
+                rec["build_7d"] = 0
+                rec["rok_use_7d"] = 0
+                rec["rok_act_7d"] = 0.0
+                rec["status"] = "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
+
+        # Update everyone present in today's 7d scan
+        for _, df in alliance_7d_dfs:
+            for _, row in df.iterrows():
+                raw_id = row.get("ID")
+                if pd.isna(raw_id):
+                    continue
+                gov_id = int(raw_id)
+                is_brand_new = gov_id not in by_id
+                if is_brand_new:
+                    by_id[gov_id] = {
+                        "id": gov_id,
+                        "name": str(row.get("Player", f"Gov-{gov_id}")).strip(),
+                        "aliases": [],
+                        "status": "Active in ODS1",
+                        "in_active_126": True,
+                        "in_kvk_4161": False,
+                        "is_new_joiner": True,
+                        "power": float(row.get("Power", 0) or 0),
+                        "forts_7d": 0,
+                        "forts_all": 0,
+                        "tech_7d": 0,
+                        "tech_all": 0,
+                        "helps_7d": 0,
+                        "helps_all": 0,
+                        "rss_7d": 0,
+                        "rss_all": 0,
+                        "build_7d": 0,
+                        "build_all": 0,
+                        "rok_use_7d": 0,
+                        "rok_use_all": 0,
+                        "rok_act_7d": 0.0,
+                        "kvk_kp": 0.0,
+                        "kvk_dkp": 0.0,
+                        "kvk_t4": 0.0,
+                        "kvk_t5": 0.0,
+                        "kvk_dead": 0.0,
+                        "kvk_healed": 0.0,
+                        "kvk_acclaim": 0.0,
+                        "kvk_trades": 0.0,
+                        "kd_rank": None,
+                        "camp_rank": None,
+                        "pwr_diff": 0.0,
+                    }
+
+                rec = by_id[gov_id]
+                p_name = str(row.get("Player", rec["name"])).strip()
+                if p_name and p_name != rec["name"]:
+                    aliases = set(rec.get("aliases", []))
+                    if rec["name"] and rec["name"] != p_name:
+                        aliases.add(rec["name"])
+                    aliases.discard(p_name)
+                    rec["aliases"] = sorted(list(aliases))
+                    rec["name"] = p_name
+
+                if gov_id not in prev_active_ids and f"{rec['name']} ({gov_id})" not in joined_names:
+                    joined_names.append(f"{rec['name']} ({gov_id})")
+
                 rec["in_active_126"] = True
                 rec["status"] = "Active in ODS1"
                 rec["power"] = float(row.get("Power", rec["power"]) or 0)
-                rec["forts_7d"] = int(row.get("Forts destroyed", 0) or 0)
-                rec["tech_7d"] = int(row.get("Technology points", 0) or 0)
-                rec["helps_7d"] = int(row.get("Alliance helps", 0) or 0)
-                rec["rss_7d"] = int(row.get("Resource assistance", 0) or 0)
-                rec["build_7d"] = int(row.get("Building time (seconds)", 0) or 0)
+                rec["forts_7d"] = int(row.get("Forts destroyed", rec.get("forts_7d", 0)) or 0)
+                rec["tech_7d"] = int(row.get("Technology points", rec.get("tech_7d", 0)) or 0)
+                rec["helps_7d"] = int(row.get("Alliance helps", rec.get("helps_7d", 0)) or 0)
+                rec["rss_7d"] = int(row.get("Resource assistance", rec.get("rss_7d", 0)) or 0)
+                rec["build_7d"] = int(row.get("Building time (seconds)", rec.get("build_7d", 0)) or 0)
+
+                # Ensure All-Time is at least 7d if no separate All-Time record existed for a new joiner
+                rec["forts_all"] = max(int(rec.get("forts_all", 0) or 0), rec["forts_7d"])
+                rec["tech_all"] = max(int(rec.get("tech_all", 0) or 0), rec["tech_7d"])
+                rec["helps_all"] = max(int(rec.get("helps_all", 0) or 0), rec["helps_7d"])
+                rec["build_all"] = max(int(rec.get("build_all", 0) or 0), rec["build_7d"])
+
                 if "Activity points" in row and pd.notna(row["Activity points"]):
                     rec["rok_act_7d"] = float(row["Activity points"])
                 if "Usefulness Score" in row and pd.notna(row["Usefulness Score"]):
@@ -396,6 +500,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
                 if pd.notna(row.get("Last login")):
                     rec["last_login"] = str(row["Last login"])
 
+    # 3. Process Kingdom 4161 KvK PlayersRanking (strict Left Join onto ODS1 members)
     for _, df in kvk_dfs:
         df_sorted = df.reset_index(drop=True).copy()
         df_sorted["KD_Rank_Calc"] = np.arange(1, len(df_sorted) + 1)
@@ -434,7 +539,21 @@ def merge_uploaded_files(base_records: list, uploaded_files: list) -> list:
                     rec["aliases"] = sorted(list(aliases))
                     rec["name"] = gname
 
-    return list(by_id.values())
+    if joined_names or left_names:
+        state.setdefault("movement_log", []).insert(0, {
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "joined": joined_names,
+            "left": left_names,
+        })
+
+    summary = {
+        "alltime_files": len(alliance_alltime_dfs),
+        "current_7d_files": len(alliance_7d_dfs),
+        "kvk_files": len(kvk_dfs),
+        "joined_count": len(joined_names),
+        "left_count": len(left_names),
+    }
+    return list(by_id.values()), summary
 
 
 def score_and_classify(
@@ -468,6 +587,9 @@ def score_and_classify(
         helps_7d = int(r.get("helps_7d", 0) or 0)
         build_7d = int(r.get("build_7d", 0) or 0)
         forts_all = int(r.get("forts_all", 0) or 0)
+        tech_all = int(r.get("tech_all", 0) or 0)
+        helps_all = int(r.get("helps_all", 0) or 0)
+        build_all = int(r.get("build_all", 0) or 0)
         kvk_dkp = float(r.get("kvk_dkp", 0) or 0)
         kvk_kp = float(r.get("kvk_kp", 0) or 0)
         kvk_healed = float(r.get("kvk_healed", 0) or 0)
@@ -476,8 +598,8 @@ def score_and_classify(
         is_new = bool(
             in_active
             and forts_all == forts_7d
-            and tech_7d == int(r.get("tech_all", 0) or 0)
-            and helps_7d == int(r.get("helps_all", 0) or 0)
+            and tech_7d == tech_all
+            and helps_7d == helps_all
         )
 
         if in_active:
@@ -546,7 +668,7 @@ def score_and_classify(
             elif overall >= 12.0 or rok_use_all >= 30:
                 rec_rank = "R1"
                 bucket = "Monitor / Warn (R1)"
-                reason = "Veteran slump — check in" if rok_use_all >= 30 else "Below standard — warn"
+                reason = "Veteran slump (All-Time Use ≥30) — check in" if rok_use_all >= 30 else "Below standard — warn"
             else:
                 rec_rank = "Kick"
                 bucket = "Kick Candidate"
@@ -565,11 +687,15 @@ def score_and_classify(
             "power": power,
             "power_m": round(power / 1e6, 2),
             "forts_7d": forts_7d,
+            "forts_all": forts_all,
             "tech_7d": tech_7d,
+            "tech_all": tech_all,
             "helps_7d": helps_7d,
+            "helps_all": helps_all,
             "build_7d": build_7d,
             "build_hrs_7d": round(build_7d / 3600.0, 1),
-            "forts_all": forts_all,
+            "build_hrs_all": round(build_all / 3600.0, 1),
+            "rok_use_all": rok_use_all,
             "kvk_dkp": kvk_dkp,
             "kvk_dkp_m": round(kvk_dkp / 1e6, 2),
             "kvk_kp": kvk_kp,
@@ -607,7 +733,10 @@ def render_table(df: pd.DataFrame) -> None:
             "Overall Score", min_value=0, max_value=100, format="%.1f"
         ),
         "ods1_usefulness": st.column_config.ProgressColumn(
-            "Usefulness", min_value=0, max_value=100, format="%.1f"
+            "7d Usefulness", min_value=0, max_value=100, format="%.1f"
+        ),
+        "rok_use_all": st.column_config.ProgressColumn(
+            "All-Time Usefulness", min_value=0, max_value=100, format="%d"
         ),
         "kvk_score": st.column_config.ProgressColumn(
             "KvK Score", min_value=0, max_value=100, format="%.1f"
@@ -619,8 +748,11 @@ def render_table(df: pd.DataFrame) -> None:
         "forts_7d": st.column_config.NumberColumn("Forts (7d)", format="%d"),
         "forts_all": st.column_config.NumberColumn("All-Time Forts", format="%d"),
         "tech_7d": st.column_config.NumberColumn("Tech (7d)", format="%d"),
+        "tech_all": st.column_config.NumberColumn("All-Time Tech", format="%d"),
         "helps_7d": st.column_config.NumberColumn("Helps (7d)", format="%d"),
-        "build_hrs_7d": st.column_config.NumberColumn("Flag Build (Hrs)", format="%.1fh"),
+        "helps_all": st.column_config.NumberColumn("All-Time Helps", format="%d"),
+        "build_hrs_7d": st.column_config.NumberColumn("Flags 7d (Hrs)", format="%.1fh"),
+        "build_hrs_all": st.column_config.NumberColumn("All-Time Flags (Hrs)", format="%.1fh"),
         "kd_rank": st.column_config.NumberColumn("KD Rank", format="#%d"),
         "kvk_healed_k": st.column_config.NumberColumn("Healed (K)", format="%.1fK"),
         "reason": st.column_config.TextColumn("Status / Protection", width="medium"),
@@ -684,20 +816,20 @@ state = st.session_state.state
 # --- CLEAN, SIMPLIFIED SIDEBAR ---
 with st.sidebar:
     st.markdown("## ⚔️ ODS1 Command")
-    st.caption("Kingdom 4161 • KvK 1")
+    st.caption("Kingdom 4161 • All-Time + Current Merger")
 
-    # 1. Simple Upload Box
-    st.markdown("### 1. Update Roster Data")
+    # 1. Simple Upload Box (Supports All-Time + Current 7d + KvK together!)
+    st.markdown("### 1. Upload All-Time + Current Data")
     uploaded_files = st.file_uploader(
-        "Drop ROKSTATS Excel files here",
+        "Drop All-Time, Current 7d, or KvK .xlsx files",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
-        help="Upload your 7-day Activity, Usefulness, or Kingdom PlayersRanking .xlsx files.",
+        help="Drop your All-Time Alliance file, your Current 7-Day Alliance file, and/or your KD 4161 PlayersRanking file together.",
     )
 
     if uploaded_files:
-        if st.button("🔄 Update Dashboard", type="primary", use_container_width=True):
-            updated_records = merge_uploaded_files(st.session_state.base_records, uploaded_files)
+        if st.button("🔄 Merge All-Time & Current", type="primary", use_container_width=True):
+            updated_records, summary = merge_uploaded_files(st.session_state.base_records, uploaded_files, state)
             st.session_state.base_records = updated_records
             with open(BASELINE_PATH, "w", encoding="utf-8") as f:
                 json.dump(updated_records, f, ensure_ascii=False, indent=2)
@@ -707,7 +839,11 @@ with st.sidebar:
                 "total_records": len(updated_records),
             })
             save_persistent_state(state)
-            st.success("Roster updated!")
+            st.success(
+                f"Merged {summary['alltime_files']} All-Time, {summary['current_7d_files']} Current 7d, "
+                f"and {summary['kvk_files']} KvK file(s)! "
+                f"(+{summary['joined_count']} joined/returned, -{summary['left_count']} rotated/left)"
+            )
 
     st.markdown("---")
 
@@ -724,7 +860,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
 
-    # 3. Clean Summary of How Ranks Work (No confusing math)
+    # 3. Clean Summary of How Ranks Work
     st.markdown("### 3. Rank Rules Summary")
     st.markdown(
         """
@@ -732,36 +868,36 @@ with st.sidebar:
             • <b>R4 / R5:</b> Locked Leadership<br>
             • <b>R3 (Top ~30%):</b> Score <b>45+</b> OR Specialist (<b>55+</b> Usefulness or <b>75+</b> KvK)<br>
             • <b>R2 (Core):</b> Score <b>24 – 44</b><br>
-            • <b>R1 (Warn):</b> Score <b>12 – 23</b><br>
-            • <b>Kick:</b> Score <b>Under 12</b> (Inactive in both)
+            • <b>R1 (Warn):</b> Score <b>12 – 23</b> (or All-Time Veteran Slump)<br>
+            • <b>Kick:</b> Score <b>Under 12</b> (Low Current &amp; Low All-Time)
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # 4. Optional Fine-Tuning tucked away cleanly
-    with st.expander("⚙️ Fine-Tune Cutoffs & Backup", expanded=False):
+    # 4. Permanent Backup / Download Merged Database
+    with st.expander("⚙️ Fine-Tune & Download Merged Data", expanded=False):
         r3_cutoff = st.slider("R3 Score Requirement", min_value=30.0, max_value=75.0, value=45.0, step=1.0)
         spec_threshold = st.slider("Specialist Usefulness Score", min_value=40.0, max_value=85.0, value=55.0, step=1.0)
         auto_update_ranks = st.toggle("Auto-Assign Ranks on Upload", value=True)
         st.markdown("---")
+        baseline_json_str = json.dumps(st.session_state.base_records, ensure_ascii=False, indent=2)
+        st.download_button(
+            "⬇️ Download Merged Database (ods1_baseline.json)",
+            data=baseline_json_str,
+            file_name="ods1_baseline.json",
+            mime="application/json",
+            use_container_width=True,
+            help="Upload this file to your GitHub data/ folder anytime you want to permanently lock in new Excel uploads.",
+        )
         state_json_str = json.dumps(state, ensure_ascii=False, indent=2)
         st.download_button(
-            "⬇️ Backup Ranks (.json)",
+            "⬇️ Backup Ranks & Log (.json)",
             data=state_json_str,
             file_name="ods1_persistent_state.json",
             mime="application/json",
             use_container_width=True,
         )
-        restored_file = st.file_uploader("Restore Backup (.json)", type=["json"], key="restore_json")
-        if restored_file is not None:
-            try:
-                restored = json.load(restored_file)
-                st.session_state.state = restored
-                save_persistent_state(restored)
-                st.success("Backup restored!")
-            except Exception as e:
-                st.error(f"Invalid JSON: {e}")
 
 df_all = score_and_classify(
     st.session_state.base_records,
@@ -790,7 +926,7 @@ st.markdown(
     <div class="hero-banner">
         <div>
             <h1 class="hero-title">⚔️ ODYSSEY1 (ODS1) Command Center</h1>
-            <div class="hero-sub">Kingdom 4161 • KvK 1 Roster Intelligence, Anti-Padding Usefulness &amp; War Performance</div>
+            <div class="hero-sub">Kingdom 4161 • All-Time History + Current 7-Day Activity + KvK War Performance</div>
         </div>
         <div class="hero-badges">
             <span class="pill-gold">{phase_mode}</span>
@@ -806,9 +942,9 @@ st.markdown(
     f"""
     <div class="kpi-row">
         <div class="kpi-box accent-blue">
-            <div class="kpi-head">Active ODS1 Roster</div>
+            <div class="kpi-head">Current In-Alliance</div>
             <div class="kpi-num">{len(active_df)}</div>
-            <div class="kpi-foot">+{len(rotated_df)} rotated out in KD 4161</div>
+            <div class="kpi-foot">{len(df_all)} All-Time ODS1 accounts tracked</div>
         </div>
         <div class="kpi-box accent-green">
             <div class="kpi-head">R3 Core &amp; Specialists</div>
@@ -818,17 +954,17 @@ st.markdown(
         <div class="kpi-box accent-amber">
             <div class="kpi-head">Monitor / Warn (R1)</div>
             <div class="kpi-num">{warn_count}</div>
-            <div class="kpi-foot">Low weekly output or slump</div>
+            <div class="kpi-foot">Low 7d output or veteran slump</div>
         </div>
         <div class="kpi-box accent-red">
             <div class="kpi-head">Kick Candidates</div>
             <div class="kpi-num">{kick_count}</div>
-            <div class="kpi-foot">Failing both support &amp; KvK</div>
+            <div class="kpi-foot">Low 7d &amp; low All-Time effort</div>
         </div>
         <div class="kpi-box accent-purple">
             <div class="kpi-head">ODS1 Combined DKP</div>
             <div class="kpi-num">{fmt_num(total_ods1_dkp)}</div>
-            <div class="kpi-foot">Active + Rotated in #4161</div>
+            <div class="kpi-foot">Current + {len(rotated_df)} Rotated in #4161</div>
         </div>
     </div>
     """,
@@ -855,30 +991,30 @@ else:
 
 tabs = st.tabs([
     "🗂️ Roster Decision Buckets",
-    "📊 Master Table",
-    "🛠️ Usefulness",
+    "📊 Current vs. All-Time Master",
+    "🛠️ Usefulness (7d & All-Time)",
     "⚔️ KvK War (#4161)",
     "🏆 Forts • Tech • Helps",
-    "🔁 Rotations & Aliases",
+    "🔁 Joins, Leaves & Rotations",
     "⚙️ Rank Manager & Briefing",
 ])
 
-# TAB 0: Visual Separated Decision Buckets
+# TAB 0: Visual Separated Decision Buckets (Shows both 7d and All-Time side by side!)
 with tabs[0]:
-    st.caption("Each tier is separated into its own section with visual progress bars for Overall Score, Usefulness, and KvK Score.")
+    st.caption("Compares each player's Current 7-Day stats alongside their All-Time ODS1 history so veterans in a temporary 1-week slump are never mistaken for deadweight.")
     active_filtered = filtered_df[filtered_df["in_active_126"]].copy()
 
     bucket_specs = [
         ("Leadership (R5/R4)", "👑 Command Leadership (R5 / R4 Protected)", "bucket-r5", True),
         ("Promote / Keep R3", "🟢 R3 Elite Core & Protected Specialists", "bucket-r3", True),
         ("Keep (R2 Core)", "🔵 R2 Standard Core Contributors", "bucket-r2", False),
-        ("Monitor / Warn (R1)", "🟠 R1 Monitor / Warning List", "bucket-r1", True),
-        ("Kick Candidate", "🔴 Kick / Replacement Candidates", "bucket-kick", True),
+        ("Monitor / Warn (R1)", "🟠 R1 Monitor / Warning List (Includes All-Time Veterans in 7d Slump)", "bucket-r1", True),
+        ("Kick Candidate", "🔴 Kick Candidates (Low Current 7d AND Low All-Time History)", "bucket-kick", True),
     ]
 
     cols_bucket = [
-        "name", "id", "rank", "overall_score", "ods1_usefulness", "kvk_score",
-        "power_m", "kvk_dkp_m", "forts_7d", "tech_7d", "build_hrs_7d", "reason"
+        "name", "id", "rank", "overall_score", "ods1_usefulness", "rok_use_all", "kvk_score",
+        "power_m", "kvk_dkp_m", "forts_7d", "forts_all", "tech_7d", "build_hrs_7d", "reason"
     ]
 
     for b_key, b_title, b_css, default_open in bucket_specs:
@@ -890,7 +1026,7 @@ with tabs[0]:
         with st.expander(f"View {b_title} ({len(sub_df)})", expanded=default_open):
             render_table(sub_df[cols_bucket])
 
-# TAB 1: Master Filterable Table
+# TAB 1: Current vs. All-Time Master Table
 with tabs[1]:
     bucket_sel = st.multiselect(
         "Filter Buckets",
@@ -900,25 +1036,31 @@ with tabs[1]:
     view_df = filtered_df[filtered_df["bucket"].isin(bucket_sel)] if bucket_sel else filtered_df
     render_table(view_df[[
         "name", "alias_str", "id", "rank", "bucket", "overall_score",
-        "ods1_usefulness", "kvk_score", "power_m", "kvk_dkp_m", "dkp_ratio_pct",
-        "forts_7d", "tech_7d", "helps_7d", "build_hrs_7d", "reason"
+        "ods1_usefulness", "rok_use_all", "kvk_score", "power_m", "kvk_dkp_m",
+        "forts_7d", "forts_all", "tech_7d", "tech_all", "helps_7d", "helps_all", "build_hrs_7d", "reason"
     ]])
 
-# TAB 2: Usefulness Leaderboard
+# TAB 2: Usefulness Leaderboard (7d vs All-Time toggle)
 with tabs[2]:
-    u_scope = st.radio("Scope", ["Active ODS1 Roster (126)", "All-Time ODS1 History (258)"], horizontal=True, label_visibility="collapsed")
-    if u_scope.startswith("Active"):
+    u_scope = st.radio(
+        "Scope",
+        ["Current 7-Day Usefulness (With All-Time Reference)", "All-Time ODS1 Usefulness (258 Historical Accounts)"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if u_scope.startswith("Current"):
         u_df = filtered_df[filtered_df["in_active_126"]].sort_values(by="ods1_usefulness", ascending=False)
-        render_podium(u_df, "ods1_usefulness", " / 100 Usefulness")
+        render_podium(u_df, "ods1_usefulness", " / 100 (7d)")
         render_table(u_df[[
-            "name", "id", "rank", "ods1_usefulness", "forts_7d", "tech_7d",
-            "helps_7d", "build_hrs_7d", "forts_all", "reason"
+            "name", "id", "rank", "ods1_usefulness", "rok_use_all",
+            "forts_7d", "forts_all", "tech_7d", "tech_all", "helps_7d", "build_hrs_7d", "reason"
         ]])
     else:
-        u_df = filtered_df.sort_values(by="forts_all", ascending=False)
+        u_df = filtered_df.sort_values(by="rok_use_all", ascending=False)
         render_podium(u_df, "forts_all", " All-Time Forts")
         render_table(u_df[[
-            "name", "alias_str", "id", "status", "forts_all", "power_m", "kvk_dkp_m"
+            "name", "alias_str", "id", "status", "rok_use_all", "ods1_usefulness",
+            "forts_all", "forts_7d", "tech_all", "helps_all", "build_hrs_all", "power_m", "kvk_dkp_m"
         ]])
 
 # TAB 3: KvK Performance Leaderboard
@@ -927,41 +1069,78 @@ with tabs[3]:
     render_podium(k_df, "kvk_dkp", " DKP")
     render_table(k_df[[
         "kd_rank", "name", "alias_str", "id", "status", "rank",
-        "kvk_score", "power_m", "kvk_kp_m", "kvk_dkp_m", "dkp_ratio_pct", "kvk_healed_k"
+        "kvk_score", "power_m", "kvk_kp_m", "kvk_dkp_m", "dkp_ratio_pct", "kvk_healed_k", "forts_all"
     ]])
 
-# TAB 4: Forts, Tech & Helps Side-by-Side Cards with Top 3 Podiums
+# TAB 4: Forts, Tech & Helps with [Current 7-Day | All-Time Total] Toggle!
 with tabs[4]:
+    period_mode = st.radio(
+        "Leaderboard Period",
+        ["Current (7-Day Delta)", "All-Time ODS1 Totals"],
+        horizontal=True,
+        label_visibility="collapsed",
+    )
     c_f, c_t, c_h = st.columns(3)
-    with c_f:
-        st.markdown("#### 🏰 Top in Forts (7d)")
-        f_top = active_df.sort_values(by="forts_7d", ascending=False)
-        render_podium(f_top, "forts_7d", " Forts")
-        render_table(f_top[["name", "forts_7d", "forts_all", "ods1_usefulness"]].head(25))
-    with c_t:
-        st.markdown("#### 📜 Top in Tech (7d)")
-        t_top = active_df.sort_values(by="tech_7d", ascending=False)
-        render_podium(t_top, "tech_7d", " Tech")
-        render_table(t_top[["name", "tech_7d", "ods1_usefulness"]].head(25))
-    with c_h:
-        st.markdown("#### 🤝 Top in Flag Hours & Helps (7d)")
-        h_top = active_df.sort_values(by="build_hrs_7d", ascending=False)
-        render_podium(h_top, "build_hrs_7d", "h Flags")
-        render_table(h_top[["name", "build_hrs_7d", "helps_7d", "ods1_usefulness"]].head(25))
+    if period_mode.startswith("Current"):
+        with c_f:
+            st.markdown("#### 🏰 Top in Forts (Current 7d)")
+            f_top = active_df.sort_values(by="forts_7d", ascending=False)
+            render_podium(f_top, "forts_7d", " Forts (7d)")
+            render_table(f_top[["name", "forts_7d", "forts_all", "ods1_usefulness"]].head(25))
+        with c_t:
+            st.markdown("#### 📜 Top in Tech (Current 7d)")
+            t_top = active_df.sort_values(by="tech_7d", ascending=False)
+            render_podium(t_top, "tech_7d", " Tech (7d)")
+            render_table(t_top[["name", "tech_7d", "tech_all", "ods1_usefulness"]].head(25))
+        with c_h:
+            st.markdown("#### 🤝 Top in Flags & Helps (Current 7d)")
+            h_top = active_df.sort_values(by="build_hrs_7d", ascending=False)
+            render_podium(h_top, "build_hrs_7d", "h Flags (7d)")
+            render_table(h_top[["name", "build_hrs_7d", "helps_7d", "ods1_usefulness"]].head(25))
+    else:
+        with c_f:
+            st.markdown("#### 🏰 Top in Forts (All-Time)")
+            f_top = filtered_df.sort_values(by="forts_all", ascending=False)
+            render_podium(f_top, "forts_all", " All-Time Forts")
+            render_table(f_top[["name", "status", "forts_all", "forts_7d", "rok_use_all"]].head(25))
+        with c_t:
+            st.markdown("#### 📜 Top in Tech (All-Time)")
+            t_top = filtered_df.sort_values(by="tech_all", ascending=False)
+            render_podium(t_top, "tech_all", " All-Time Tech")
+            render_table(t_top[["name", "status", "tech_all", "tech_7d", "rok_use_all"]].head(25))
+        with c_h:
+            st.markdown("#### 🤝 Top in Flags & Helps (All-Time)")
+            h_top = filtered_df.sort_values(by="build_hrs_all", ascending=False)
+            render_podium(h_top, "build_hrs_all", "h All-Time Flags")
+            render_table(h_top[["name", "status", "build_hrs_all", "helps_all", "rok_use_all"]].head(25))
 
-# TAB 5: Rotations & Name Changes
+# TAB 5: Joins, Leaves, Rotations & Aliases
 with tabs[5]:
+    if state.get("movement_log"):
+        st.markdown("#### 📋 Recent Roster Movement Log (Joins & Leaves Detected Across Uploads)")
+        for entry in state["movement_log"][:5]:
+            st.info(
+                f"**{entry['timestamp']}** — "
+                f"**Joined / Returned ({len(entry['joined'])}):** {', '.join(entry['joined']) if entry['joined'] else 'None'} | "
+                f"**Rotated Out / Left ({len(entry['left'])}):** {', '.join(entry['left']) if entry['left'] else 'None'}"
+            )
+
     col_rot, col_aka = st.columns([1.35, 1.0])
     with col_rot:
-        st.markdown("#### 🔁 Rotated Out of ODS1 (Active in KD 4161)")
+        st.markdown("#### 🔁 Rotated Out of ODS1 (In All-Time File, Not in Current 7d File, Active in KD 4161)")
         render_table(rotated_df.sort_values(by="kvk_dkp", ascending=False)[[
-            "name", "alias_str", "id", "kd_rank", "power_m", "kvk_dkp_m", "forts_all"
+            "name", "alias_str", "id", "kd_rank", "power_m", "kvk_dkp_m", "forts_all", "rok_use_all"
         ]])
     with col_aka:
-        st.markdown("#### 🏷️ Detected Name Changes (20 IDs)")
+        st.markdown("#### 🏷️ Detected Name Changes (All-Time vs. Current / KvK)")
         changed_df = df_all[df_all["alias_str"].str.len() > 0]
         render_table(changed_df[[
             "name", "alias_str", "id", "status", "kvk_dkp_m"
+        ]])
+
+    with st.expander(f"🚪 View Departed / Inactive Historical Accounts ({len(departed_df)} accounts)", expanded=False):
+        render_table(departed_df.sort_values(by="forts_all", ascending=False)[[
+            "name", "alias_str", "id", "power_m", "forts_all", "tech_all", "rok_use_all"
         ]])
 
 # TAB 6: Rank Override & Discord Briefing
