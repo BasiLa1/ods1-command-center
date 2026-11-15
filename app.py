@@ -202,16 +202,17 @@ st.markdown("""
         margin-top: 3px;
     }
 
-    /* Modern Segmented Pill Navigation Bar (No Red Underline, Equal Spacing) */
+    /* High-Impact Command Navigation Bar (Larger, Bold, Glowing Active State) */
     .stTabs [data-baseweb="tab-list"] {
         display: flex;
-        gap: 6px;
-        background-color: #0d1322;
-        padding: 6px;
-        border-radius: 14px;
-        border: 1px solid #1e293b;
-        margin-bottom: 22px;
-        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+        gap: 10px;
+        background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
+        padding: 10px;
+        border-radius: 16px;
+        border: 1px solid #334155;
+        margin-top: 6px;
+        margin-bottom: 26px;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
     .stTabs [data-baseweb="tab-highlight"],
     .stTabs [data-baseweb="tab-border"] {
@@ -222,27 +223,44 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] {
         flex: 1 1 0px;
         justify-content: center;
-        height: 40px;
-        border-radius: 10px !important;
-        padding: 0 14px !important;
-        font-size: 0.84rem !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.01em;
-        color: #94a3b8 !important;
-        background-color: transparent !important;
-        border: 1px solid transparent !important;
-        transition: all 0.18s ease !important;
+        height: 52px !important;
+        border-radius: 12px !important;
+        padding: 0 18px !important;
+        color: #cbd5e1 !important;
+        background-color: #131c31 !important;
+        border: 1px solid #263554 !important;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
         white-space: nowrap;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    }
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] div,
+    .stTabs [data-baseweb="tab"] span {
+        font-size: 0.98rem !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.02em !important;
+        color: inherit !important;
+        margin: 0 !important;
     }
     .stTabs [data-baseweb="tab"]:hover {
-        color: #e2e8f0 !important;
-        background-color: rgba(30, 41, 59, 0.55) !important;
+        color: #ffffff !important;
+        background-color: #1e293b !important;
+        border-color: #fbbf24 !important;
+        transform: translateY(-2px);
+        box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
     }
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(30, 41, 59, 0.95) 100%) !important;
-        color: #fbbf24 !important;
-        border: 1px solid rgba(251, 191, 36, 0.45) !important;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+        color: #070b14 !important;
+        border: 1px solid #fde68a !important;
+        transform: translateY(-2px);
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.45), 0 6px 14px rgba(0, 0, 0, 0.5) !important;
+    }
+    .stTabs [aria-selected="true"] p,
+    .stTabs [aria-selected="true"] div,
+    .stTabs [aria-selected="true"] span {
+        color: #070b14 !important;
+        font-weight: 800 !important;
     }
 
     [data-testid="stDataFrame"] {
