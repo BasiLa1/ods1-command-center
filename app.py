@@ -33,6 +33,22 @@ st.markdown("""
         border-right: 1px solid #1e293b;
     }
 
+    /* Sidebar Rules Card */
+    .rules-card {
+        background: #111827;
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        color: #cbd5e1;
+    }
+    .rules-card b {
+        color: #fbbf24;
+    }
+
     /* Hero Banner */
     .hero-banner {
         background: radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 45%),
@@ -133,13 +149,6 @@ st.markdown("""
     }
 
     /* Section Headers & Cards */
-    .section-card {
-        background: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 14px;
-        padding: 18px 20px;
-        margin-bottom: 20px;
-    }
     .bucket-banner {
         display: flex;
         justify-content: space-between;
@@ -436,10 +445,10 @@ def score_and_classify(
     spec_threshold: float,
     auto_update_ranks: bool,
 ) -> pd.DataFrame:
-    if phase_mode == "Early KvK (Day 8 - Forts/Flags Heavy)":
+    if phase_mode == "Early KvK (Forts & Flags Focus)":
         w_use, w_kvk = 0.55, 0.45
-    elif phase_mode == "Mid KvK (Pass Skirmishes)":
-        w_use, w_kvk = 0.45, 0.55
+    elif phase_mode == "Mid KvK (Balanced 50/50)":
+        w_use, w_kvk = 0.50, 0.50
     else:
         w_use, w_kvk = 0.30, 0.70
 
@@ -472,32 +481,32 @@ def score_and_classify(
         )
 
         if in_active:
-            s_forts = min(forts_7d / 100.0, 1.0) * 40.0
-            s_tech = min(tech_7d / 75000.0, 1.0) * 25.0
-            s_build = min(build_7d / 60000.0, 1.0) * 20.0
-            s_helps = min(helps_7d / 2000.0, 1.0) * 15.0
+            # Calibrated to match ROKSTATS native Usefulness scale (200 forts = 52 pts, 100k tech = 20 pts, 25h flags = 20 pts, 2.5k helps = 8 pts)
+            s_forts = min(forts_7d / 200.0, 1.0) * 52.0
+            s_tech = min(tech_7d / 100000.0, 1.0) * 20.0
+            s_build = min(build_7d / 90000.0, 1.0) * 20.0
+            s_helps = min(helps_7d / 2500.0, 1.0) * 8.0
             use_score = round(s_forts + s_tech + s_build + s_helps, 1)
         else:
             use_score = float(rok_use_all)
 
         pwr_m = power / 1e6
         if pwr_m < 12.0:
-            t_ratio = 0.08
+            t_ratio = 0.10
         elif pwr_m <= 20.0:
-            t_ratio = 0.12
+            t_ratio = 0.15
         else:
-            t_ratio = 0.18
+            t_ratio = 0.22
         ratio = (kvk_dkp / power) if power > 0 else 0.0
         r_score = min(ratio / t_ratio, 1.0) * 75.0
-        h_bonus = min(kvk_healed / 350000.0, 1.0) * 15.0
-        a_bonus = min(kvk_acclaim / 35000.0, 1.0) * 10.0
+        h_bonus = min(kvk_healed / 500000.0, 1.0) * 15.0
+        a_bonus = min(kvk_acclaim / 50000.0, 1.0) * 10.0
         kvk_score = round(min(r_score + h_bonus + a_bonus, 100.0), 1)
 
-        vet_bonus = min(forts_all / 500.0, 1.0) * 5.0
-        overall = round(min((w_use * use_score) + (w_kvk * kvk_score) + vet_bonus, 100.0), 1)
+        overall = round(min((w_use * use_score) + (w_kvk * kvk_score), 100.0), 1)
 
         is_excused = gov_id in excused_set
-        is_specialist = (use_score >= spec_threshold) or (kvk_score >= spec_threshold)
+        is_specialist = (use_score >= spec_threshold) or (kvk_score >= 75.0)
 
         if gov_id in DEFAULT_R5_IDS:
             rec_rank = "R5"
@@ -530,11 +539,11 @@ def score_and_classify(
                 rec_rank = "R3"
                 bucket = "Promote / Keep R3"
                 reason = "Specialist Immunity" if (is_specialist and overall < r3_cutoff) else "Top-Tier Core"
-            elif overall >= 32.0 or use_score >= 48.0 or kvk_score >= 50.0:
+            elif overall >= 24.0 or use_score >= 30.0 or kvk_score >= 40.0:
                 rec_rank = "R2"
                 bucket = "Keep (R2 Core)"
                 reason = "Standard contributor"
-            elif overall >= 16.0 or rok_use_all >= 30:
+            elif overall >= 12.0 or rok_use_all >= 30:
                 rec_rank = "R1"
                 bucket = "Monitor / Warn (R1)"
                 reason = "Veteran slump — check in" if rok_use_all >= 30 else "Below standard — warn"
@@ -672,36 +681,22 @@ if "base_records" not in st.session_state:
 
 state = st.session_state.state
 
+# --- CLEAN, SIMPLIFIED SIDEBAR ---
 with st.sidebar:
-    st.markdown("### ⚔️ ODS1 Command")
+    st.markdown("## ⚔️ ODS1 Command")
     st.caption("Kingdom 4161 • KvK 1")
 
-    phase_mode = st.selectbox(
-        "KvK Scoring Phase",
-        [
-            "Early KvK (Day 8 - Forts/Flags Heavy)",
-            "Mid KvK (Pass Skirmishes)",
-            "Late KvK (King's Land War)",
-        ],
-        index=0,
-    )
-
-    with st.expander("🎯 Rank & Immunity Cutoffs", expanded=False):
-        r3_cutoff = st.slider("R3 Overall Cutoff", min_value=45.0, max_value=80.0, value=64.0, step=1.0)
-        spec_threshold = st.slider("Specialist Immunity", min_value=65.0, max_value=95.0, value=82.0, step=1.0)
-
-    auto_update_ranks = st.toggle("Auto-Update Ranks on Upload", value=True)
-
-    st.markdown("---")
-    st.markdown("### 📂 Upload ROKSTATS Files")
+    # 1. Simple Upload Box
+    st.markdown("### 1. Update Roster Data")
     uploaded_files = st.file_uploader(
-        "Drop 7d Activity, Usefulness, All-Time, or PlayersRanking .xlsx",
+        "Drop ROKSTATS Excel files here",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
+        help="Upload your 7-day Activity, Usefulness, or Kingdom PlayersRanking .xlsx files.",
     )
 
     if uploaded_files:
-        if st.button("🔄 Merge & Save Snapshot", type="primary", use_container_width=True):
+        if st.button("🔄 Update Dashboard", type="primary", use_container_width=True):
             updated_records = merge_uploaded_files(st.session_state.base_records, uploaded_files)
             st.session_state.base_records = updated_records
             with open(BASELINE_PATH, "w", encoding="utf-8") as f:
@@ -712,24 +707,59 @@ with st.sidebar:
                 "total_records": len(updated_records),
             })
             save_persistent_state(state)
-            st.success(f"Merged {len(uploaded_files)} file(s).")
+            st.success("Roster updated!")
 
-    with st.expander("💾 State Backup (.json)", expanded=False):
+    st.markdown("---")
+
+    # 2. Simple KvK Phase Switcher
+    st.markdown("### 2. KvK Stage")
+    phase_mode = st.radio(
+        "Select current KvK focus:",
+        [
+            "Early KvK (Forts & Flags Focus)",
+            "Mid KvK (Balanced 50/50)",
+            "Late KvK (Pass & King's Land War)",
+        ],
+        index=0,
+        label_visibility="collapsed",
+    )
+
+    # 3. Clean Summary of How Ranks Work (No confusing math)
+    st.markdown("### 3. Rank Rules Summary")
+    st.markdown(
+        """
+        <div class="rules-card">
+            • <b>R4 / R5:</b> Locked Leadership<br>
+            • <b>R3 (Top ~30%):</b> Score <b>45+</b> OR Specialist (<b>55+</b> Usefulness or <b>75+</b> KvK)<br>
+            • <b>R2 (Core):</b> Score <b>24 – 44</b><br>
+            • <b>R1 (Warn):</b> Score <b>12 – 23</b><br>
+            • <b>Kick:</b> Score <b>Under 12</b> (Inactive in both)
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # 4. Optional Fine-Tuning tucked away cleanly
+    with st.expander("⚙️ Fine-Tune Cutoffs & Backup", expanded=False):
+        r3_cutoff = st.slider("R3 Score Requirement", min_value=30.0, max_value=75.0, value=45.0, step=1.0)
+        spec_threshold = st.slider("Specialist Usefulness Score", min_value=40.0, max_value=85.0, value=55.0, step=1.0)
+        auto_update_ranks = st.toggle("Auto-Assign Ranks on Upload", value=True)
+        st.markdown("---")
         state_json_str = json.dumps(state, ensure_ascii=False, indent=2)
         st.download_button(
-            "⬇️ Download Saved State",
+            "⬇️ Backup Ranks (.json)",
             data=state_json_str,
             file_name="ods1_persistent_state.json",
             mime="application/json",
             use_container_width=True,
         )
-        restored_file = st.file_uploader("Restore State JSON", type=["json"], key="restore_json")
+        restored_file = st.file_uploader("Restore Backup (.json)", type=["json"], key="restore_json")
         if restored_file is not None:
             try:
                 restored = json.load(restored_file)
                 st.session_state.state = restored
                 save_persistent_state(restored)
-                st.success("State restored.")
+                st.success("Backup restored!")
             except Exception as e:
                 st.error(f"Invalid JSON: {e}")
 
@@ -763,7 +793,7 @@ st.markdown(
             <div class="hero-sub">Kingdom 4161 • KvK 1 Roster Intelligence, Anti-Padding Usefulness &amp; War Performance</div>
         </div>
         <div class="hero-badges">
-            <span class="pill-gold">{phase_mode.split(" (")[0]}</span>
+            <span class="pill-gold">{phase_mode}</span>
             <span class="pill-blue">R5: MA7ZM &amp; ᴼᴰ AYHAM</span>
         </div>
     </div>
