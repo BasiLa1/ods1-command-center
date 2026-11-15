@@ -303,7 +303,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 96573.0,
     "kvk_acclaim": 1720.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0051,
     "last_login": "2026-11-15T10:48:07.370Z"
   },
@@ -787,7 +787,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 65835.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T11:16:58.524Z"
   },
@@ -875,7 +875,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 69765.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T12:11:56.769Z"
   },
@@ -1183,7 +1183,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 95271.0,
     "kvk_acclaim": 2439.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0051,
     "last_login": "2026-11-14T20:40:31.639Z"
   },
@@ -1271,7 +1271,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 180900.0,
     "kvk_acclaim": 1167.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0028,
     "last_login": "2026-11-15T11:27:18.666Z"
   },
@@ -1535,7 +1535,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 125695.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0011,
     "last_login": "2026-11-14T20:12:45.583Z"
   },
@@ -1711,7 +1711,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 73397.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T11:36:31.416Z"
   },
@@ -1975,7 +1975,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 25933.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T01:45:10.116Z"
   },
@@ -2019,7 +2019,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 43287.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T05:52:09.289Z"
   },
@@ -2239,7 +2239,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 176881.0,
     "kvk_acclaim": 3883.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0038,
     "last_login": "2026-11-15T12:17:31.424Z"
   },
@@ -2327,7 +2327,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 62584.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0008,
     "last_login": "2026-11-15T12:30:47.833Z"
   },
@@ -2415,7 +2415,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 22275.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-14T22:07:08.969Z"
   },
@@ -2459,7 +2459,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 9904.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-14T19:17:59.562Z"
   },
@@ -2591,7 +2591,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 74034.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0005,
     "last_login": "2026-11-14T21:31:12.485Z"
   },
@@ -2811,7 +2811,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 8803.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-14T18:56:00.661Z"
   },
@@ -3075,7 +3075,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 41098.0,
     "kvk_acclaim": 1266.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0044,
     "last_login": "2026-11-15T06:02:42.836Z"
   },
@@ -3119,7 +3119,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 109431.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0008,
     "last_login": "2026-11-15T11:33:36.874Z"
   },
@@ -3207,7 +3207,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 89.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-14T16:20:31.616Z"
   },
@@ -3251,7 +3251,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 84592.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0005,
     "last_login": "2026-11-15T06:57:02.292Z"
   },
@@ -3339,7 +3339,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 23914.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T08:38:54.774Z"
   },
@@ -3471,7 +3471,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 203.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T03:01:18.204Z"
   },
@@ -3515,7 +3515,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 38945.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T09:02:29.738Z"
   },
@@ -3649,7 +3649,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 59721.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-08T23:20:26.615Z"
   },
@@ -3693,7 +3693,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 203773.0,
     "kvk_acclaim": 4717.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0113,
     "last_login": "2026-11-15T10:57:28.598Z"
   },
@@ -3869,7 +3869,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 130022.0,
     "kvk_acclaim": 2696.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0098,
     "last_login": "2026-11-14T21:20:40.400Z"
   },
@@ -3957,7 +3957,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-15T22:37:51.650Z"
   },
@@ -4001,7 +4001,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 3492.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T01:23:31.602Z"
   },
@@ -4045,7 +4045,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 56112.0,
     "kvk_acclaim": 1536.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0039,
     "last_login": "2026-11-15T03:42:02.235Z"
   },
@@ -4135,7 +4135,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-01T22:56:50.358Z"
   },
@@ -4267,7 +4267,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-18T12:58:13.152Z"
   },
@@ -4355,7 +4355,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 22643.0,
     "kvk_acclaim": 1921.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0059,
     "last_login": "2026-11-15T01:07:50.638Z"
   },
@@ -4399,7 +4399,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T18:04:46.606Z"
   },
@@ -4487,7 +4487,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 114045.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0007,
     "last_login": "2026-11-15T11:48:20.372Z"
   },
@@ -4531,7 +4531,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 202875.0,
     "kvk_acclaim": 2173.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0336,
     "last_login": "2026-11-15T08:59:18.600Z"
   },
@@ -4619,7 +4619,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 52967.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T03:35:27.583Z"
   },
@@ -4707,7 +4707,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 79515.0,
     "kvk_acclaim": 2910.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.003,
     "last_login": "2026-11-15T11:33:28.494Z"
   },
@@ -4795,7 +4795,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 35819.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T11:27:15.358Z"
   },
@@ -4839,7 +4839,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 17862.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0002,
     "last_login": "2026-11-15T02:21:50.676Z"
   },
@@ -4927,7 +4927,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T08:18:24.729Z"
   },
@@ -4971,7 +4971,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 78650.0,
     "kvk_acclaim": 3164.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0046,
     "last_login": "2026-11-15T12:13:24.826Z"
   },
@@ -5015,7 +5015,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-31T21:54:46.617Z"
   },
@@ -5059,7 +5059,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 1262.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-31T05:54:43.663Z"
   },
@@ -5191,7 +5191,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 76066.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T12:07:42.920Z"
   },
@@ -5235,7 +5235,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 255727.0,
     "kvk_acclaim": 3114.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0152,
     "last_login": "2026-11-15T10:37:05.763Z"
   },
@@ -5369,7 +5369,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-24T13:58:58.840Z"
   },
@@ -5413,7 +5413,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 27587.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-01T01:19:08.960Z"
   },
@@ -5457,7 +5457,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-24T22:20:08.879Z"
   },
@@ -5545,7 +5545,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 13924.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T06:05:26.859Z"
   },
@@ -5859,7 +5859,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 33664.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-01T22:11:29.037Z"
   },
@@ -5947,7 +5947,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T13:16:31.137Z"
   },
@@ -6035,7 +6035,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 7415.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T06:12:53.712Z"
   },
@@ -6079,7 +6079,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 20875.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T09:58:48.865Z"
   },
@@ -6167,7 +6167,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-17T02:07:52.098Z"
   },
@@ -6211,7 +6211,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-24T11:30:59.523Z"
   },
@@ -6255,7 +6255,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-11T07:47:45.808Z"
   },
@@ -6299,7 +6299,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 73913.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0001,
     "last_login": "2026-09-27T23:33:59.826Z"
   },
@@ -6387,7 +6387,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-18T23:00:01.074Z"
   },
@@ -6431,7 +6431,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-04T01:17:53.340Z"
   },
@@ -6477,7 +6477,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 208379.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0003,
     "last_login": "2026-09-20T18:05:00.767Z"
   },
@@ -6565,7 +6565,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 19693.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-08T22:03:56.303Z"
   },
@@ -6609,7 +6609,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 8589.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-08T22:59:27.285Z"
   },
@@ -6653,7 +6653,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 68245.0,
     "kvk_acclaim": 63.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0004,
     "last_login": "2026-11-15T12:10:40.996Z"
   },
@@ -6785,7 +6785,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 34818.0,
     "kvk_acclaim": 2189.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0044,
     "last_login": "2026-11-01T21:58:35.339Z"
   },
@@ -6829,7 +6829,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-11T23:43:36.397Z"
   },
@@ -6875,7 +6875,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 19233.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-18T18:05:27.669Z"
   },
@@ -6901,9 +6901,9 @@
     "forts_7d": 39,
     "forts_all": 39,
     "tech_7d": 61900,
-    "tech_all": 62000,
+    "tech_all": 64700,
     "helps_7d": 2180,
-    "helps_all": 2193,
+    "helps_all": 2212,
     "build_7d": 23054,
     "build_all": 23054,
     "rss_7d": 0,
@@ -6963,7 +6963,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-31T10:56:43.924Z"
   },
@@ -6991,7 +6991,7 @@
     "tech_7d": 13000,
     "tech_all": 13000,
     "helps_7d": 573,
-    "helps_all": 573,
+    "helps_all": 582,
     "build_7d": 28874,
     "build_all": 28874,
     "rss_7d": 0,
@@ -7051,7 +7051,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 1106.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-20T22:53:58.445Z"
   },
@@ -7095,7 +7095,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-31T22:17:54.118Z"
   },
@@ -7271,7 +7271,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-17T20:56:54.140Z"
   },
@@ -7447,7 +7447,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-05T10:00:39.738Z"
   },
@@ -7581,7 +7581,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 47029.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0009,
     "last_login": "2026-11-08T17:34:59.524Z"
   },
@@ -7669,7 +7669,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-11T15:41:21.424Z"
   },
@@ -7713,7 +7713,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-20T19:26:15.139Z"
   },
@@ -7845,7 +7845,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-19T00:07:10.482Z"
   },
@@ -8047,9 +8047,9 @@
     "forts_7d": 16,
     "forts_all": 16,
     "tech_7d": 32700,
-    "tech_all": 32700,
+    "tech_all": 35700,
     "helps_7d": 259,
-    "helps_all": 259,
+    "helps_all": 274,
     "build_7d": 20000,
     "build_all": 20000,
     "rss_7d": 3600000,
@@ -8065,7 +8065,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 26284.0,
     "kvk_acclaim": 1140.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0047,
     "last_login": "2026-11-15T11:57:21.774Z"
   },
@@ -8109,7 +8109,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-11T07:52:47.690Z"
   },
@@ -8153,7 +8153,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-08-20T21:05:31.585Z"
   },
@@ -8241,7 +8241,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T23:35:30.582Z"
   },
@@ -8285,7 +8285,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 41731.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-08T23:26:46.529Z"
   },
@@ -8419,7 +8419,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T02:29:04.437Z"
   },
@@ -8463,7 +8463,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-30T19:29:40.606Z"
   },
@@ -8507,7 +8507,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-01T14:28:44.962Z"
   },
@@ -8819,7 +8819,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 91168.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0003,
     "last_login": "2026-08-20T22:59:08.460Z"
   },
@@ -8953,7 +8953,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-27T23:26:13.918Z"
   },
@@ -9507,9 +9507,9 @@
     "forts_7d": 0,
     "forts_all": 0,
     "tech_7d": 40400,
-    "tech_all": 40400,
+    "tech_all": 42000,
     "helps_7d": 130,
-    "helps_all": 130,
+    "helps_all": 138,
     "build_7d": 0,
     "build_all": 0,
     "rss_7d": 0,
@@ -9525,7 +9525,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 26948.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-15T10:16:57.911Z"
   },
@@ -9569,7 +9569,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T20:32:58.411Z"
   },
@@ -9613,7 +9613,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-25T22:48:50.105Z"
   },
@@ -9637,11 +9637,11 @@
     "kvk_score": 2.3,
     "overall_score": 10.0,
     "forts_7d": 15,
-    "forts_all": 15,
+    "forts_all": 18,
     "tech_7d": 26400,
     "tech_all": 26400,
     "helps_7d": 143,
-    "helps_all": 143,
+    "helps_all": 150,
     "build_7d": 631,
     "build_all": 631,
     "rss_7d": 0,
@@ -9657,7 +9657,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 45953.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0003,
     "last_login": "2026-11-14T23:27:58.630Z"
   },
@@ -9747,7 +9747,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-27T21:37:01.099Z"
   },
@@ -9951,9 +9951,9 @@
     "forts_7d": 0,
     "forts_all": 0,
     "tech_7d": 9300,
-    "tech_all": 9300,
+    "tech_all": 10600,
     "helps_7d": 36,
-    "helps_all": 36,
+    "helps_all": 45,
     "build_7d": 0,
     "build_all": 0,
     "rss_7d": 0,
@@ -9969,7 +9969,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 20921.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0038,
     "last_login": "2026-11-15T09:14:42.494Z"
   },
@@ -10015,7 +10015,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-27T22:02:26.319Z"
   },
@@ -10173,11 +10173,11 @@
     "kvk_score": 59.3,
     "overall_score": 28.2,
     "forts_7d": 5,
-    "forts_all": 5,
+    "forts_all": 6,
     "tech_7d": 0,
-    "tech_all": 0,
+    "tech_all": 2200,
     "helps_7d": 93,
-    "helps_all": 93,
+    "helps_all": 121,
     "build_7d": 0,
     "build_all": 0,
     "rss_7d": 0,
@@ -10415,7 +10415,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 140289.0,
     "kvk_acclaim": 3359.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0069,
     "last_login": "2026-09-27T22:54:38.892Z"
   },
@@ -10459,7 +10459,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 43634.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-08T20:17:23.585Z"
   },
@@ -10679,7 +10679,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 84659.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-18T20:03:38.811Z"
   },
@@ -10793,9 +10793,9 @@
     "forts_7d": 0,
     "forts_all": 0,
     "tech_7d": 0,
-    "tech_all": 0,
+    "tech_all": 1900,
     "helps_7d": 11,
-    "helps_all": 11,
+    "helps_all": 15,
     "build_7d": 0,
     "build_all": 0,
     "rss_7d": 0,
@@ -10811,7 +10811,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-11-14T10:53:48.253Z"
   },
@@ -11075,7 +11075,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-10-18T07:37:43.901Z"
   },
@@ -11167,7 +11167,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 0.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-08-20T23:44:49.905Z"
   },
@@ -11387,7 +11387,7 @@
     "kvk_dead_t5": 0.0,
     "kvk_healed": 27569.0,
     "kvk_acclaim": 0.0,
-    "kvk_trades": 0.0,
+    "kvk_trades": NaN,
     "dkp_ratio": 0.0,
     "last_login": "2026-09-20T23:34:21.208Z"
   }
