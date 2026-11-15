@@ -317,8 +317,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
 
         cols = set(df.columns)
         if "Alliance helps" in cols and "Forts destroyed" in cols:
-            # Distinguish All-Time export from Current/7-Day export:
-            # All-Time exports have >165 rows (historical members) or much higher average forts (>150)
             avg_forts = df["Forts destroyed"].mean() if "Forts destroyed" in df.columns else 0
             is_alltime = (len(df) > 165) or (avg_forts > 130)
             if is_alltime:
@@ -328,7 +326,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
         elif "Governor ID" in cols and ("DKP" in cols or "KP" in cols):
             kvk_dfs.append((uf.name, df))
 
-    # 1. Process All-Time ODS1 files first (updates historical totals & adds any missing historical members)
+    # 1. Process All-Time ODS1 files first
     for _, df in alliance_alltime_dfs:
         for _, row in df.iterrows():
             raw_id = row.get("ID")
@@ -393,7 +391,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
             if pd.notna(row.get("Last login")):
                 rec["last_login"] = str(row["Last login"])
 
-    # 2. Process Current / 7-Day Alliance files (resets active flags so rotated/departed members are accurately detected!)
+    # 2. Process Current / 7-Day Alliance files
     joined_names = []
     left_names = []
 
@@ -406,7 +404,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                     continue
                 new_active_ids.add(int(raw_id))
 
-        # Mark anyone NOT in today's current 7d scan as rotated/departed and zero out their 7d stats
         for gid, rec in by_id.items():
             if gid not in new_active_ids:
                 if gid in prev_active_ids:
@@ -421,7 +418,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rok_act_7d"] = 0.0
                 rec["status"] = "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
 
-        # Update everyone present in today's 7d scan
         for _, df in alliance_7d_dfs:
             for _, row in df.iterrows():
                 raw_id = row.get("ID")
@@ -487,7 +483,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rss_7d"] = int(row.get("Resource assistance", rec.get("rss_7d", 0)) or 0)
                 rec["build_7d"] = int(row.get("Building time (seconds)", rec.get("build_7d", 0)) or 0)
 
-                # Ensure All-Time is at least 7d if no separate All-Time record existed for a new joiner
                 rec["forts_all"] = max(int(rec.get("forts_all", 0) or 0), rec["forts_7d"])
                 rec["tech_all"] = max(int(rec.get("tech_all", 0) or 0), rec["tech_7d"])
                 rec["helps_all"] = max(int(rec.get("helps_all", 0) or 0), rec["helps_7d"])
@@ -603,7 +598,6 @@ def score_and_classify(
         )
 
         if in_active:
-            # Calibrated to match ROKSTATS native Usefulness scale (200 forts = 52 pts, 100k tech = 20 pts, 25h flags = 20 pts, 2.5k helps = 8 pts)
             s_forts = min(forts_7d / 200.0, 1.0) * 52.0
             s_tech = min(tech_7d / 100000.0, 1.0) * 20.0
             s_build = min(build_7d / 90000.0, 1.0) * 20.0
