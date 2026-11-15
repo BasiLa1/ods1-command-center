@@ -202,26 +202,47 @@ st.markdown("""
         margin-top: 3px;
     }
 
-    /* Navigation Tabs */
+    /* Modern Segmented Pill Navigation Bar (No Red Underline, Equal Spacing) */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: #0f172a;
-        padding: 7px;
-        border-radius: 12px;
+        display: flex;
+        gap: 6px;
+        background-color: #0d1322;
+        padding: 6px;
+        border-radius: 14px;
         border: 1px solid #1e293b;
-        margin-bottom: 18px;
+        margin-bottom: 22px;
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45);
+    }
+    .stTabs [data-baseweb="tab-highlight"],
+    .stTabs [data-baseweb="tab-border"] {
+        display: none !important;
+        background-color: transparent !important;
+        height: 0px !important;
     }
     .stTabs [data-baseweb="tab"] {
-        border-radius: 8px;
-        padding: 9px 16px;
-        font-size: 0.86rem;
-        font-weight: 600;
-        color: #94a3b8;
+        flex: 1 1 0px;
+        justify-content: center;
+        height: 40px;
+        border-radius: 10px !important;
+        padding: 0 14px !important;
+        font-size: 0.84rem !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.01em;
+        color: #94a3b8 !important;
+        background-color: transparent !important;
+        border: 1px solid transparent !important;
+        transition: all 0.18s ease !important;
+        white-space: nowrap;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #e2e8f0 !important;
+        background-color: rgba(30, 41, 59, 0.55) !important;
     }
     .stTabs [aria-selected="true"] {
-        background-color: #1e293b !important;
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(30, 41, 59, 0.95) 100%) !important;
         color: #fbbf24 !important;
-        border: 1px solid rgba(251, 191, 36, 0.35) !important;
+        border: 1px solid rgba(251, 191, 36, 0.45) !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
     }
 
     [data-testid="stDataFrame"] {
@@ -317,6 +338,8 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
 
         cols = set(df.columns)
         if "Alliance helps" in cols and "Forts destroyed" in cols:
+            # Distinguish All-Time export from Current/7-Day export:
+            # All-Time exports have >165 rows (historical members) or much higher average forts (>150)
             avg_forts = df["Forts destroyed"].mean() if "Forts destroyed" in df.columns else 0
             is_alltime = (len(df) > 165) or (avg_forts > 130)
             if is_alltime:
@@ -326,7 +349,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
         elif "Governor ID" in cols and ("DKP" in cols or "KP" in cols):
             kvk_dfs.append((uf.name, df))
 
-    # 1. Process All-Time ODS1 files first
+    # 1. Process All-Time ODS1 files first (updates historical totals & adds any missing historical members)
     for _, df in alliance_alltime_dfs:
         for _, row in df.iterrows():
             raw_id = row.get("ID")
@@ -391,7 +414,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
             if pd.notna(row.get("Last login")):
                 rec["last_login"] = str(row["Last login"])
 
-    # 2. Process Current / 7-Day Alliance files
+    # 2. Process Current / 7-Day Alliance files (resets active flags so rotated/departed members are accurately detected!)
     joined_names = []
     left_names = []
 
@@ -404,6 +427,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                     continue
                 new_active_ids.add(int(raw_id))
 
+        # Mark anyone NOT in today's current 7d scan as rotated/departed and zero out their 7d stats
         for gid, rec in by_id.items():
             if gid not in new_active_ids:
                 if gid in prev_active_ids:
@@ -418,6 +442,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rok_act_7d"] = 0.0
                 rec["status"] = "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
 
+        # Update everyone present in today's 7d scan
         for _, df in alliance_7d_dfs:
             for _, row in df.iterrows():
                 raw_id = row.get("ID")
@@ -483,6 +508,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rss_7d"] = int(row.get("Resource assistance", rec.get("rss_7d", 0)) or 0)
                 rec["build_7d"] = int(row.get("Building time (seconds)", rec.get("build_7d", 0)) or 0)
 
+                # Ensure All-Time is at least 7d if no separate All-Time record existed for a new joiner
                 rec["forts_all"] = max(int(rec.get("forts_all", 0) or 0), rec["forts_7d"])
                 rec["tech_all"] = max(int(rec.get("tech_all", 0) or 0), rec["tech_7d"])
                 rec["helps_all"] = max(int(rec.get("helps_all", 0) or 0), rec["helps_7d"])
@@ -598,6 +624,7 @@ def score_and_classify(
         )
 
         if in_active:
+            # Calibrated to match ROKSTATS native Usefulness scale (200 forts = 52 pts, 100k tech = 20 pts, 25h flags = 20 pts, 2.5k helps = 8 pts)
             s_forts = min(forts_7d / 200.0, 1.0) * 52.0
             s_tech = min(tech_7d / 100000.0, 1.0) * 20.0
             s_build = min(build_7d / 90000.0, 1.0) * 20.0
@@ -984,13 +1011,13 @@ else:
     filtered_df = df_all.copy()
 
 tabs = st.tabs([
-    "🗂️ Roster Decision Buckets",
-    "📊 Current vs. All-Time Master",
-    "🛠️ Usefulness (7d & All-Time)",
-    "⚔️ KvK War (#4161)",
-    "🏆 Forts • Tech • Helps",
-    "🔁 Joins, Leaves & Rotations",
-    "⚙️ Rank Manager & Briefing",
+    "Decision Buckets",
+    "Master Roster",
+    "Usefulness",
+    "KvK War (#4161)",
+    "Forts • Tech • Helps",
+    "Rotations & Log",
+    "Rank & Briefing",
 ])
 
 # TAB 0: Visual Separated Decision Buckets (Shows both 7d and All-Time side by side!)
