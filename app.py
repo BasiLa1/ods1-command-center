@@ -14,120 +14,207 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
     .stApp {
-        background-color: #090d16;
-        color: #f1f5f9;
+        background-color: #070b14;
+        color: #f8fafc;
     }
     .main .block-container {
-        padding-top: 1.75rem;
-        padding-bottom: 2.5rem;
-        max-width: 1420px;
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+        max-width: 1460px;
     }
     [data-testid="stSidebar"] {
-        background-color: #0e1422;
+        background-color: #0b1120;
         border-right: 1px solid #1e293b;
     }
 
-    /* Header Banner */
-    .ods1-header {
+    /* Hero Banner */
+    .hero-banner {
+        background: radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 45%),
+                    linear-gradient(135deg, #0f172a 0%, #111827 100%);
+        border: 1px solid #1e293b;
+        border-left: 5px solid #f59e0b;
+        border-radius: 16px;
+        padding: 22px 26px;
+        margin-bottom: 22px;
         display: flex;
-        flex-wrap: wrap;
         justify-content: space-between;
         align-items: center;
-        background: linear-gradient(135deg, #111827 0%, #172033 100%);
-        border: 1px solid #263349;
-        border-radius: 14px;
-        padding: 18px 22px;
-        margin-bottom: 18px;
+        flex-wrap: wrap;
+        gap: 14px;
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
     }
-    .ods1-title {
-        font-size: 1.55rem;
-        font-weight: 700;
-        color: #f8fafc;
+    .hero-title {
+        font-size: 1.65rem;
+        font-weight: 800;
+        color: #ffffff;
         margin: 0;
         letter-spacing: -0.02em;
     }
-    .ods1-subtitle {
-        font-size: 0.85rem;
+    .hero-sub {
+        font-size: 0.88rem;
         color: #94a3b8;
-        margin-top: 4px;
+        margin-top: 5px;
     }
-    .ods1-pill {
-        background: rgba(251, 191, 36, 0.12);
-        border: 1px solid rgba(251, 191, 36, 0.35);
+    .hero-badges {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .pill-gold {
+        background: rgba(245, 158, 11, 0.14);
+        border: 1px solid rgba(245, 158, 11, 0.4);
         color: #fbbf24;
-        padding: 6px 12px;
+        padding: 6px 14px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+    }
+    .pill-blue {
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.35);
+        color: #38bdf8;
+        padding: 6px 14px;
         border-radius: 999px;
         font-size: 0.78rem;
         font-weight: 600;
     }
 
-    /* KPI Cards */
-    .kpi-grid {
+    /* KPI Strip */
+    .kpi-row {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 18px;
+        gap: 14px;
+        margin-bottom: 26px;
     }
     @media (max-width: 1100px) {
-        .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
-    .kpi-card {
-        background: #111827;
+    .kpi-box {
+        background: #0f172a;
         border: 1px solid #1e293b;
-        border-radius: 12px;
-        padding: 14px 16px;
-        transition: border-color 0.15s ease;
+        border-radius: 14px;
+        padding: 16px 18px;
+        position: relative;
+        overflow: hidden;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
     }
-    .kpi-card:hover { border-color: #334155; }
-    .kpi-label {
-        font-size: 0.72rem;
-        font-weight: 600;
+    .kpi-box.accent-blue { border-top: 3px solid #38bdf8; }
+    .kpi-box.accent-green { border-top: 3px solid #10b981; }
+    .kpi-box.accent-amber { border-top: 3px solid #f59e0b; }
+    .kpi-box.accent-red { border-top: 3px solid #ef4444; }
+    .kpi-box.accent-purple { border-top: 3px solid #a855f7; }
+
+    .kpi-head {
+        font-size: 0.73rem;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.07em;
         color: #94a3b8;
     }
-    .kpi-val {
-        font-size: 1.45rem;
-        font-weight: 700;
+    .kpi-num {
+        font-size: 1.65rem;
+        font-weight: 800;
         color: #f8fafc;
-        margin-top: 4px;
+        margin-top: 6px;
+        line-height: 1.1;
     }
-    .kpi-val.gold { color: #fbbf24; }
-    .kpi-sub {
+    .kpi-foot {
         font-size: 0.76rem;
         color: #64748b;
+        margin-top: 6px;
+    }
+
+    /* Section Headers & Cards */
+    .section-card {
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 14px;
+        padding: 18px 20px;
+        margin-bottom: 20px;
+    }
+    .bucket-banner {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 11px 16px;
+        border-radius: 10px;
+        margin-top: 18px;
+        margin-bottom: 10px;
+        font-weight: 700;
+        font-size: 0.95rem;
+    }
+    .bucket-r5 { background: rgba(168, 85, 247, 0.14); border-left: 4px solid #a855f7; color: #e9d5ff; }
+    .bucket-r3 { background: rgba(16, 185, 129, 0.14); border-left: 4px solid #10b981; color: #a7f3d0; }
+    .bucket-r2 { background: rgba(59, 130, 246, 0.14); border-left: 4px solid #3b82f6; color: #bfdbfe; }
+    .bucket-r1 { background: rgba(245, 158, 11, 0.14); border-left: 4px solid #f59e0b; color: #fde68a; }
+    .bucket-kick { background: rgba(239, 68, 68, 0.14); border-left: 4px solid #ef4444; color: #fecaca; }
+
+    /* Podium Cards */
+    .podium-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+    .podium-card {
+        background: linear-gradient(145deg, #111827, #1e293b);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 12px 14px;
+    }
+    .podium-rank {
+        font-size: 0.72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: #fbbf24;
+        letter-spacing: 0.05em;
+    }
+    .podium-name {
+        font-size: 1.02rem;
+        font-weight: 700;
+        color: #ffffff;
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .podium-stat {
+        font-size: 0.84rem;
+        color: #38bdf8;
+        font-weight: 600;
         margin-top: 3px;
     }
 
-    /* Tab Styling */
+    /* Navigation Tabs */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        background-color: #0e1422;
-        padding: 6px;
+        gap: 8px;
+        background-color: #0f172a;
+        padding: 7px;
         border-radius: 12px;
         border: 1px solid #1e293b;
-        margin-bottom: 14px;
+        margin-bottom: 18px;
     }
     .stTabs [data-baseweb="tab"] {
         border-radius: 8px;
-        padding: 8px 14px;
-        font-size: 0.84rem;
-        font-weight: 500;
+        padding: 9px 16px;
+        font-size: 0.86rem;
+        font-weight: 600;
         color: #94a3b8;
     }
     .stTabs [aria-selected="true"] {
         background-color: #1e293b !important;
         color: #fbbf24 !important;
-        font-weight: 600;
+        border: 1px solid rgba(251, 191, 36, 0.35) !important;
     }
 
-    /* Dataframe polish */
     [data-testid="stDataFrame"] {
         border: 1px solid #1e293b;
         border-radius: 12px;
@@ -155,19 +242,10 @@ DEFAULT_R4_IDS = {
 }
 
 
-def fmt_power(val: float) -> str:
+def fmt_num(val: float) -> str:
     v = float(val or 0)
     if abs(v) >= 1e9:
         return f"{v/1e9:.2f}B"
-    if abs(v) >= 1e6:
-        return f"{v/1e6:.2f}M"
-    if abs(v) >= 1e3:
-        return f"{v/1e3:.1f}K"
-    return f"{v:.0f}"
-
-
-def fmt_num(val: float) -> str:
-    v = float(val or 0)
     if abs(v) >= 1e6:
         return f"{v/1e6:.2f}M"
     if abs(v) >= 1e3:
@@ -476,23 +554,21 @@ def score_and_classify(
             **r,
             "id": gov_id,
             "power": power,
-            "power_fmt": fmt_power(power),
+            "power_m": round(power / 1e6, 2),
             "forts_7d": forts_7d,
             "tech_7d": tech_7d,
-            "tech_7d_fmt": fmt_num(tech_7d),
             "helps_7d": helps_7d,
-            "helps_7d_fmt": fmt_num(helps_7d),
             "build_7d": build_7d,
             "build_hrs_7d": round(build_7d / 3600.0, 1),
             "forts_all": forts_all,
             "kvk_dkp": kvk_dkp,
-            "kvk_dkp_fmt": fmt_num(kvk_dkp),
+            "kvk_dkp_m": round(kvk_dkp / 1e6, 2),
             "kvk_kp": kvk_kp,
-            "kvk_kp_fmt": fmt_num(kvk_kp),
+            "kvk_kp_m": round(kvk_kp / 1e6, 2),
             "kvk_healed": kvk_healed,
-            "kvk_healed_fmt": fmt_num(kvk_healed),
+            "kvk_healed_k": round(kvk_healed / 1e3, 1),
             "kvk_acclaim": kvk_acclaim,
-            "dkp_ratio_pct": round(ratio * 100.0, 2),
+            "dkp_ratio_pct": round(ratio * 100.0, 1),
             "ods1_usefulness": use_score,
             "kvk_score": kvk_score,
             "overall_score": overall,
@@ -509,6 +585,59 @@ def score_and_classify(
 
     df_out = pd.DataFrame(rows)
     return df_out.sort_values(by=["overall_score", "kvk_dkp"], ascending=[False, False]).reset_index(drop=True)
+
+
+def render_table(df: pd.DataFrame) -> None:
+    col_cfg = {
+        "id": st.column_config.NumberColumn("Governor ID", format="%d"),
+        "name": st.column_config.TextColumn("Governor", width="medium"),
+        "alias_str": st.column_config.TextColumn("Former Name(s)", width="small"),
+        "rank": st.column_config.TextColumn("Rank", width="small"),
+        "bucket": st.column_config.TextColumn("Decision Bucket", width="medium"),
+        "overall_score": st.column_config.ProgressColumn(
+            "Overall Score", min_value=0, max_value=100, format="%.1f"
+        ),
+        "ods1_usefulness": st.column_config.ProgressColumn(
+            "Usefulness", min_value=0, max_value=100, format="%.1f"
+        ),
+        "kvk_score": st.column_config.ProgressColumn(
+            "KvK Score", min_value=0, max_value=100, format="%.1f"
+        ),
+        "power_m": st.column_config.NumberColumn("Power (M)", format="%.2fM"),
+        "kvk_dkp_m": st.column_config.NumberColumn("KvK DKP (M)", format="%.2fM"),
+        "kvk_kp_m": st.column_config.NumberColumn("KvK KP (M)", format="%.2fM"),
+        "dkp_ratio_pct": st.column_config.NumberColumn("DKP / Power", format="%.1f%%"),
+        "forts_7d": st.column_config.NumberColumn("Forts (7d)", format="%d"),
+        "forts_all": st.column_config.NumberColumn("All-Time Forts", format="%d"),
+        "tech_7d": st.column_config.NumberColumn("Tech (7d)", format="%d"),
+        "helps_7d": st.column_config.NumberColumn("Helps (7d)", format="%d"),
+        "build_hrs_7d": st.column_config.NumberColumn("Flag Build (Hrs)", format="%.1fh"),
+        "kd_rank": st.column_config.NumberColumn("KD Rank", format="#%d"),
+        "kvk_healed_k": st.column_config.NumberColumn("Healed (K)", format="%.1fK"),
+        "reason": st.column_config.TextColumn("Status / Protection", width="medium"),
+    }
+    active_cfg = {k: v for k, v in col_cfg.items() if k in df.columns}
+    st.dataframe(df, column_config=active_cfg, use_container_width=True, hide_index=True)
+
+
+def render_podium(df: pd.DataFrame, val_col: str, suffix: str = "") -> None:
+    top3 = df.head(3).to_dict("records")
+    if not top3:
+        return
+    medals = ["🥇 #1", "🥈 #2", "🥉 #3"]
+    cards_html = '<div class="podium-grid">'
+    for idx, row in enumerate(top3):
+        val = row.get(val_col, 0)
+        val_str = f"{val:,.0f}{suffix}" if isinstance(val, (int, float)) else f"{val}{suffix}"
+        cards_html += (
+            f'<div class="podium-card">'
+            f'<div class="podium-rank">{medals[idx]}</div>'
+            f'<div class="podium-name">{row.get("name", "")}</div>'
+            f'<div class="podium-stat">{val_str}</div>'
+            f'</div>'
+        )
+    cards_html += "</div>"
+    st.markdown(cards_html, unsafe_allow_html=True)
 
 
 def build_discord_briefing(df: pd.DataFrame, phase_mode: str) -> str:
@@ -532,7 +661,7 @@ def build_discord_briefing(df: pd.DataFrame, phase_mode: str) -> str:
         f"**Kick Candidates ({len(kick_list)}):** " + (", ".join(kick_list) if kick_list else "None"),
         f"**Top Rotated Active in KD 4161:** " + (", ".join(rot_list) if rot_list else "None"),
     ]
-    return "\n".join(lines)
+    return chr(10).join(lines)
 
 
 if "state" not in st.session_state:
@@ -544,11 +673,11 @@ if "base_records" not in st.session_state:
 state = st.session_state.state
 
 with st.sidebar:
-    st.markdown("### ⚔️ ODS1 Controls")
-    st.caption("KD 4161 • KvK 1 (Day 8)")
+    st.markdown("### ⚔️ ODS1 Command")
+    st.caption("Kingdom 4161 • KvK 1")
 
     phase_mode = st.selectbox(
-        "Scoring Phase",
+        "KvK Scoring Phase",
         [
             "Early KvK (Day 8 - Forts/Flags Heavy)",
             "Mid KvK (Pass Skirmishes)",
@@ -557,25 +686,22 @@ with st.sidebar:
         index=0,
     )
 
-    with st.expander("Rank & Specialist Thresholds", expanded=False):
+    with st.expander("🎯 Rank & Immunity Cutoffs", expanded=False):
         r3_cutoff = st.slider("R3 Overall Cutoff", min_value=45.0, max_value=80.0, value=64.0, step=1.0)
         spec_threshold = st.slider("Specialist Immunity", min_value=65.0, max_value=95.0, value=82.0, step=1.0)
 
-    auto_update_ranks = st.toggle(
-        "Auto-Update Ranks on Upload",
-        value=True,
-    )
+    auto_update_ranks = st.toggle("Auto-Update Ranks on Upload", value=True)
 
     st.markdown("---")
-    st.markdown("### 📂 Update Data")
+    st.markdown("### 📂 Upload ROKSTATS Files")
     uploaded_files = st.file_uploader(
-        "Upload ROKSTATS .xlsx files",
+        "Drop 7d Activity, Usefulness, All-Time, or PlayersRanking .xlsx",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
     )
 
     if uploaded_files:
-        if st.button("Merge & Save Snapshot", type="primary", use_container_width=True):
+        if st.button("🔄 Merge & Save Snapshot", type="primary", use_container_width=True):
             updated_records = merge_uploaded_files(st.session_state.base_records, uploaded_files)
             st.session_state.base_records = updated_records
             with open(BASELINE_PATH, "w", encoding="utf-8") as f:
@@ -588,10 +714,10 @@ with st.sidebar:
             save_persistent_state(state)
             st.success(f"Merged {len(uploaded_files)} file(s).")
 
-    with st.expander("Backup & Restore (.json)", expanded=False):
+    with st.expander("💾 State Backup (.json)", expanded=False):
         state_json_str = json.dumps(state, ensure_ascii=False, indent=2)
         st.download_button(
-            "Download Saved State",
+            "⬇️ Download Saved State",
             data=state_json_str,
             file_name="ods1_persistent_state.json",
             mime="application/json",
@@ -621,72 +747,70 @@ active_df = df_all[df_all["in_active_126"]].copy()
 rotated_df = df_all[(~df_all["in_active_126"]) & (df_all["in_kvk_4161"])].copy()
 departed_df = df_all[(~df_all["in_active_126"]) & (~df_all["in_kvk_4161"])].copy()
 
-st.markdown(
-    f"""
-    <div class="ods1-header">
-        <div>
-            <h1 class="ods1-title">ODYSSEY1 (ODS1) Command Center</h1>
-            <div class="ods1-subtitle">Kingdom 4161 • KvK 1 • Persistent Roster, Rotation &amp; Performance Tracker</div>
-        </div>
-        <div class="ods1-pill">{phase_mode.split(" (")[0]}</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
 r3_count = int((active_df["rank"] == "R3").sum())
 r3_pct = (r3_count / max(len(active_df), 1)) * 100.0
-kick_count = int((active_df["bucket"] == "Kick Candidate").sum())
+r2_count = int((active_df["rank"] == "R2").sum())
 warn_count = int((active_df["bucket"] == "Monitor / Warn (R1)").sum())
+kick_count = int((active_df["bucket"] == "Kick Candidate").sum())
 total_ods1_dkp = active_df["kvk_dkp"].sum() + rotated_df["kvk_dkp"].sum()
 
+# Hero Banner
 st.markdown(
     f"""
-    <div class="kpi-grid">
-        <div class="kpi-card">
-            <div class="kpi-label">Active ODS1</div>
-            <div class="kpi-val">{len(active_df)}</div>
-            <div class="kpi-sub">+{len(rotated_df)} rotated in #4161</div>
+    <div class="hero-banner">
+        <div>
+            <h1 class="hero-title">⚔️ ODYSSEY1 (ODS1) Command Center</h1>
+            <div class="hero-sub">Kingdom 4161 • KvK 1 Roster Intelligence, Anti-Padding Usefulness &amp; War Performance</div>
         </div>
-        <div class="kpi-card">
-            <div class="kpi-label">R3 Core</div>
-            <div class="kpi-val gold">{r3_count} ({r3_pct:.0f}%)</div>
-            <div class="kpi-sub">Target ~30% • Cutoff {r3_cutoff:.0f}</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Monitor / Warn</div>
-            <div class="kpi-val">{warn_count}</div>
-            <div class="kpi-sub">R1 watch / veteran slump</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">Kick Candidates</div>
-            <div class="kpi-val">{kick_count}</div>
-            <div class="kpi-sub">Low support &amp; low KvK</div>
-        </div>
-        <div class="kpi-card">
-            <div class="kpi-label">ODS1 KvK DKP</div>
-            <div class="kpi-val gold">{fmt_num(total_ods1_dkp)}</div>
-            <div class="kpi-sub">Active + Rotated #4161</div>
+        <div class="hero-badges">
+            <span class="pill-gold">{phase_mode.split(" (")[0]}</span>
+            <span class="pill-blue">R5: MA7ZM &amp; ᴼᴰ AYHAM</span>
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-f_col1, f_col2 = st.columns([2.2, 1.8])
-with f_col1:
-    search_q = st.text_input(
-        "Search Governor",
-        placeholder="Search name, former alias, or ID...",
-        label_visibility="collapsed",
-    )
-with f_col2:
-    bucket_filter = st.multiselect(
-        "Filter Buckets",
-        options=sorted(df_all["bucket"].unique().tolist()),
-        default=["Leadership (R5/R4)", "Promote / Keep R3", "Keep (R2 Core)", "Monitor / Warn (R1)", "Kick Candidate"],
-        label_visibility="collapsed",
-    )
+# Color-Coded KPI Cards
+st.markdown(
+    f"""
+    <div class="kpi-row">
+        <div class="kpi-box accent-blue">
+            <div class="kpi-head">Active ODS1 Roster</div>
+            <div class="kpi-num">{len(active_df)}</div>
+            <div class="kpi-foot">+{len(rotated_df)} rotated out in KD 4161</div>
+        </div>
+        <div class="kpi-box accent-green">
+            <div class="kpi-head">R3 Core &amp; Specialists</div>
+            <div class="kpi-num">{r3_count} ({r3_pct:.0f}%)</div>
+            <div class="kpi-foot">R2 Core: {r2_count} members</div>
+        </div>
+        <div class="kpi-box accent-amber">
+            <div class="kpi-head">Monitor / Warn (R1)</div>
+            <div class="kpi-num">{warn_count}</div>
+            <div class="kpi-foot">Low weekly output or slump</div>
+        </div>
+        <div class="kpi-box accent-red">
+            <div class="kpi-head">Kick Candidates</div>
+            <div class="kpi-num">{kick_count}</div>
+            <div class="kpi-foot">Failing both support &amp; KvK</div>
+        </div>
+        <div class="kpi-box accent-purple">
+            <div class="kpi-head">ODS1 Combined DKP</div>
+            <div class="kpi-num">{fmt_num(total_ods1_dkp)}</div>
+            <div class="kpi-foot">Active + Rotated in #4161</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Search Bar
+search_q = st.text_input(
+    "🔍 Search Governor",
+    placeholder="Search by current name, former alias (e.g. A c e ツ), or Governor ID...",
+    label_visibility="collapsed",
+)
 
 if search_q.strip():
     q = search_q.strip().lower()
@@ -700,170 +824,149 @@ else:
     filtered_df = df_all.copy()
 
 tabs = st.tabs([
-    "Overview",
-    "Usefulness",
-    "KvK (#4161)",
-    "Forts • Tech • Helps",
-    "Rotations & Aliases",
-    "Rank & Excused",
-    "Briefing",
+    "🗂️ Roster Decision Buckets",
+    "📊 Master Table",
+    "🛠️ Usefulness",
+    "⚔️ KvK War (#4161)",
+    "🏆 Forts • Tech • Helps",
+    "🔁 Rotations & Aliases",
+    "⚙️ Rank Manager & Briefing",
 ])
 
+# TAB 0: Visual Separated Decision Buckets
 with tabs[0]:
-    view_df = filtered_df[filtered_df["bucket"].isin(bucket_filter)] if bucket_filter else filtered_df
-    cols_0 = [
-        "name", "id", "rank", "bucket", "overall_score", "ods1_usefulness",
-        "kvk_score", "power_fmt", "kvk_dkp_fmt", "dkp_ratio_pct",
-        "forts_7d", "tech_7d_fmt", "helps_7d_fmt", "build_hrs_7d", "reason"
+    st.caption("Each tier is separated into its own section with visual progress bars for Overall Score, Usefulness, and KvK Score.")
+    active_filtered = filtered_df[filtered_df["in_active_126"]].copy()
+
+    bucket_specs = [
+        ("Leadership (R5/R4)", "👑 Command Leadership (R5 / R4 Protected)", "bucket-r5", True),
+        ("Promote / Keep R3", "🟢 R3 Elite Core & Protected Specialists", "bucket-r3", True),
+        ("Keep (R2 Core)", "🔵 R2 Standard Core Contributors", "bucket-r2", False),
+        ("Monitor / Warn (R1)", "🟠 R1 Monitor / Warning List", "bucket-r1", True),
+        ("Kick Candidate", "🔴 Kick / Replacement Candidates", "bucket-kick", True),
     ]
-    st.dataframe(
-        view_df[cols_0].rename(columns={
-            "name": "Governor",
-            "id": "ID",
-            "rank": "Rank",
-            "bucket": "Bucket",
-            "overall_score": "Overall",
-            "ods1_usefulness": "Usefulness",
-            "kvk_score": "KvK Score",
-            "power_fmt": "Power",
-            "kvk_dkp_fmt": "KvK DKP",
-            "dkp_ratio_pct": "DKP/Pwr %",
-            "forts_7d": "Forts (7d)",
-            "tech_7d_fmt": "Tech (7d)",
-            "helps_7d_fmt": "Helps (7d)",
-            "build_hrs_7d": "Build Hrs",
-            "reason": "Notes / Status",
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
 
+    cols_bucket = [
+        "name", "id", "rank", "overall_score", "ods1_usefulness", "kvk_score",
+        "power_m", "kvk_dkp_m", "forts_7d", "tech_7d", "build_hrs_7d", "reason"
+    ]
+
+    for b_key, b_title, b_css, default_open in bucket_specs:
+        sub_df = active_filtered[active_filtered["bucket"] == b_key]
+        st.markdown(
+            f'<div class="bucket-banner {b_css}"><span>{b_title}</span><span>{len(sub_df)} Members</span></div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander(f"View {b_title} ({len(sub_df)})", expanded=default_open):
+            render_table(sub_df[cols_bucket])
+
+# TAB 1: Master Filterable Table
 with tabs[1]:
-    u_mode = st.radio("Roster Scope", ["Active ODS1 (126)", "All-Time ODS1 (258)"], horizontal=True, label_visibility="collapsed")
-    u_df = filtered_df[filtered_df["in_active_126"]] if u_mode.startswith("Active") else filtered_df
-    if u_mode.startswith("Active"):
-        u_df = u_df.sort_values(by="ods1_usefulness", ascending=False)
-        st.dataframe(
-            u_df[["name", "id", "rank", "ods1_usefulness", "rok_use_7d", "forts_7d", "tech_7d_fmt", "helps_7d_fmt", "build_hrs_7d", "forts_all"]].rename(columns={
-                "name": "Governor", "id": "ID", "rank": "Rank", "ods1_usefulness": "ODS1 Usefulness",
-                "rok_use_7d": "ROK Usefulness", "forts_7d": "Forts (7d)", "tech_7d_fmt": "Tech (7d)",
-                "helps_7d_fmt": "Helps (7d)", "build_hrs_7d": "Build Hrs", "forts_all": "All-Time Forts"
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        u_df = u_df.sort_values(by="rok_use_all", ascending=False)
-        st.dataframe(
-            u_df[["name", "id", "status", "rok_use_all", "forts_all", "tech_all", "helps_all"]].rename(columns={
-                "name": "Governor", "id": "ID", "status": "Status", "rok_use_all": "All-Time Score",
-                "forts_all": "Forts", "tech_all": "Tech", "helps_all": "Helps"
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-with tabs[2]:
-    k_df = filtered_df[filtered_df["in_kvk_4161"]].sort_values(by="kvk_dkp", ascending=False)
-    st.dataframe(
-        k_df[["kd_rank", "name", "id", "status", "rank", "power_fmt", "kvk_kp_fmt", "kvk_dkp_fmt", "dkp_ratio_pct", "kvk_healed_fmt", "kvk_score"]].rename(columns={
-            "kd_rank": "KD #", "name": "Governor", "id": "ID", "status": "Status", "rank": "Rank",
-            "power_fmt": "Power", "kvk_kp_fmt": "KvK KP", "kvk_dkp_fmt": "KvK DKP",
-            "dkp_ratio_pct": "DKP/Pwr %", "kvk_healed_fmt": "Healed", "kvk_score": "KvK Score"
-        }),
-        use_container_width=True,
-        hide_index=True,
+    bucket_sel = st.multiselect(
+        "Filter Buckets",
+        options=sorted(df_all["bucket"].unique().tolist()),
+        default=["Leadership (R5/R4)", "Promote / Keep R3", "Keep (R2 Core)", "Monitor / Warn (R1)", "Kick Candidate"],
     )
+    view_df = filtered_df[filtered_df["bucket"].isin(bucket_sel)] if bucket_sel else filtered_df
+    render_table(view_df[[
+        "name", "alias_str", "id", "rank", "bucket", "overall_score",
+        "ods1_usefulness", "kvk_score", "power_m", "kvk_dkp_m", "dkp_ratio_pct",
+        "forts_7d", "tech_7d", "helps_7d", "build_hrs_7d", "reason"
+    ]])
 
+# TAB 2: Usefulness Leaderboard
+with tabs[2]:
+    u_scope = st.radio("Scope", ["Active ODS1 Roster (126)", "All-Time ODS1 History (258)"], horizontal=True, label_visibility="collapsed")
+    if u_scope.startswith("Active"):
+        u_df = filtered_df[filtered_df["in_active_126"]].sort_values(by="ods1_usefulness", ascending=False)
+        render_podium(u_df, "ods1_usefulness", " / 100 Usefulness")
+        render_table(u_df[[
+            "name", "id", "rank", "ods1_usefulness", "forts_7d", "tech_7d",
+            "helps_7d", "build_hrs_7d", "forts_all", "reason"
+        ]])
+    else:
+        u_df = filtered_df.sort_values(by="forts_all", ascending=False)
+        render_podium(u_df, "forts_all", " All-Time Forts")
+        render_table(u_df[[
+            "name", "alias_str", "id", "status", "forts_all", "power_m", "kvk_dkp_m"
+        ]])
+
+# TAB 3: KvK Performance Leaderboard
 with tabs[3]:
+    k_df = filtered_df[filtered_df["in_kvk_4161"]].sort_values(by="kvk_dkp", ascending=False)
+    render_podium(k_df, "kvk_dkp", " DKP")
+    render_table(k_df[[
+        "kd_rank", "name", "alias_str", "id", "status", "rank",
+        "kvk_score", "power_m", "kvk_kp_m", "kvk_dkp_m", "dkp_ratio_pct", "kvk_healed_k"
+    ]])
+
+# TAB 4: Forts, Tech & Helps Side-by-Side Cards with Top 3 Podiums
+with tabs[4]:
     c_f, c_t, c_h = st.columns(3)
     with c_f:
-        st.markdown("#### Top in Forts (7d)")
-        st.dataframe(
-            active_df.sort_values(by="forts_7d", ascending=False)[["name", "forts_7d", "forts_all"]].head(25).rename(columns={
-                "name": "Governor", "forts_7d": "7d", "forts_all": "All-Time"
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("#### 🏰 Top in Forts (7d)")
+        f_top = active_df.sort_values(by="forts_7d", ascending=False)
+        render_podium(f_top, "forts_7d", " Forts")
+        render_table(f_top[["name", "forts_7d", "forts_all", "ods1_usefulness"]].head(25))
     with c_t:
-        st.markdown("#### Top in Tech (7d)")
-        st.dataframe(
-            active_df.sort_values(by="tech_7d", ascending=False)[["name", "tech_7d_fmt", "ods1_usefulness"]].head(25).rename(columns={
-                "name": "Governor", "tech_7d_fmt": "Tech (7d)", "ods1_usefulness": "Usefulness"
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("#### 📜 Top in Tech (7d)")
+        t_top = active_df.sort_values(by="tech_7d", ascending=False)
+        render_podium(t_top, "tech_7d", " Tech")
+        render_table(t_top[["name", "tech_7d", "ods1_usefulness"]].head(25))
     with c_h:
-        st.markdown("#### Top in Helps & Flags (7d)")
-        st.dataframe(
-            active_df.sort_values(by="helps_7d", ascending=False)[["name", "helps_7d_fmt", "build_hrs_7d"]].head(25).rename(columns={
-                "name": "Governor", "helps_7d_fmt": "Helps (7d)", "build_hrs_7d": "Build Hrs"
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("#### 🤝 Top in Flag Hours & Helps (7d)")
+        h_top = active_df.sort_values(by="build_hrs_7d", ascending=False)
+        render_podium(h_top, "build_hrs_7d", "h Flags")
+        render_table(h_top[["name", "build_hrs_7d", "helps_7d", "ods1_usefulness"]].head(25))
 
-with tabs[4]:
-    st.markdown("#### Rotated Out of ODS1 Snapshot (Active in KD 4161)")
-    st.dataframe(
-        rotated_df.sort_values(by="kvk_dkp", ascending=False)[["name", "alias_str", "id", "kd_rank", "power_fmt", "kvk_kp_fmt", "kvk_dkp_fmt", "forts_all"]].rename(columns={
-            "name": "Current Name", "alias_str": "Former Name(s)", "id": "ID", "kd_rank": "KD #",
-            "power_fmt": "Power", "kvk_kp_fmt": "KvK KP", "kvk_dkp_fmt": "KvK DKP", "forts_all": "ODS1 Forts"
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.markdown("#### Detected Name Changes (Tracked by Governor ID)")
-    changed_df = df_all[df_all["alias_str"].str.len() > 0][["name", "alias_str", "id", "status", "kvk_dkp_fmt"]].rename(columns={
-        "name": "Current Name", "alias_str": "Previous Name(s)", "id": "ID", "status": "Status", "kvk_dkp_fmt": "KvK DKP"
-    })
-    st.dataframe(changed_df, use_container_width=True, hide_index=True)
-
-    st.markdown("#### Departed / Inactive Accounts")
-    st.dataframe(
-        departed_df[["name", "id", "power_fmt", "forts_all", "rok_use_all"]].rename(columns={
-            "name": "Governor", "id": "ID", "power_fmt": "Power", "forts_all": "Forts", "rok_use_all": "All-Time Score"
-        }),
-        use_container_width=True,
-        hide_index=True,
-    )
-
+# TAB 5: Rotations & Name Changes
 with tabs[5]:
-    sel_player = st.selectbox(
-        "Select Governor",
-        options=df_all["id"].tolist(),
-        format_func=lambda gid: f"{df_all[df_all['id']==gid]['name'].values[0]} ({gid}) — {df_all[df_all['id']==gid]['rank'].values[0]}",
-    )
-    curr_row = df_all[df_all["id"] == sel_player].iloc[0]
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
+    col_rot, col_aka = st.columns([1.35, 1.0])
+    with col_rot:
+        st.markdown("#### 🔁 Rotated Out of ODS1 (Active in KD 4161)")
+        render_table(rotated_df.sort_values(by="kvk_dkp", ascending=False)[[
+            "name", "alias_str", "id", "kd_rank", "power_m", "kvk_dkp_m", "forts_all"
+        ]])
+    with col_aka:
+        st.markdown("#### 🏷️ Detected Name Changes (20 IDs)")
+        changed_df = df_all[df_all["alias_str"].str.len() > 0]
+        render_table(changed_df[[
+            "name", "alias_str", "id", "status", "kvk_dkp_m"
+        ]])
+
+# TAB 6: Rank Override & Discord Briefing
+with tabs[6]:
+    col_mgr, col_disc = st.columns([1.1, 1.2])
+    with col_mgr:
+        st.markdown("#### ✏️ Manual Rank Override & Excused Toggle")
+        sel_player = st.selectbox(
+            "Select Governor",
+            options=df_all["id"].tolist(),
+            format_func=lambda gid: f"{df_all[df_all['id']==gid]['name'].values[0]} ({gid}) — {df_all[df_all['id']==gid]['rank'].values[0]}",
+        )
+        curr_row = df_all[df_all["id"] == sel_player].iloc[0]
         new_rank_choice = st.selectbox(
-            "Rank",
+            "Set Saved Rank",
             ["R5", "R4", "R3", "R2", "R1", "Kick"],
             index=["R5", "R4", "R3", "R2", "R1", "Kick"].index(curr_row["rank"]) if curr_row["rank"] in ["R5", "R4", "R3", "R2", "R1", "Kick"] else 3,
         )
-    with col_b:
-        st.write("")
-        st.write("")
-        excused_choice = st.checkbox("Excused Absence / Protection", value=bool(curr_row["is_excused"]))
-    with col_c:
+        excused_choice = st.checkbox("Mark Excused (Rebuild / Vacation Immunity)", value=bool(curr_row["is_excused"]))
         note_choice = st.text_input("Officer Note", value=str(curr_row["officer_note"]))
 
-    if st.button("Save Changes", type="primary"):
-        state["custom_ranks"][str(sel_player)] = new_rank_choice
-        exc_list = set(int(x) for x in state.get("excused_ids", []))
-        if excused_choice:
-            exc_list.add(int(sel_player))
-        else:
-            exc_list.discard(int(sel_player))
-        state["excused_ids"] = sorted(list(exc_list))
-        state["notes"][str(sel_player)] = note_choice
-        save_persistent_state(state)
-        st.success("Saved.")
-        st.rerun()
+        if st.button("💾 Save Override", type="primary"):
+            state["custom_ranks"][str(sel_player)] = new_rank_choice
+            exc_list = set(int(x) for x in state.get("excused_ids", []))
+            if excused_choice:
+                exc_list.add(int(sel_player))
+            else:
+                exc_list.discard(int(sel_player))
+            state["excused_ids"] = sorted(list(exc_list))
+            state["notes"][str(sel_player)] = note_choice
+            save_persistent_state(state)
+            st.success("Saved.")
+            st.rerun()
 
-with tabs[6]:
-    briefing_text = build_discord_briefing(df_all, phase_mode)
-    st.code(briefing_text, language="markdown")
+    with col_disc:
+        st.markdown("#### 📋 1-Click Discord / R4 Briefing")
+        briefing_text = build_discord_briefing(df_all, phase_mode)
+        st.code(briefing_text, language="markdown")
