@@ -1,3 +1,4 @@
+import glob
 import json
 import os
 from datetime import datetime, timezone
@@ -301,11 +302,36 @@ def fmt_num(val: float) -> str:
     return f"{v:,.0f}"
 
 
-def load_baseline_records() -> list:
-    if os.path.exists(BASELINE_PATH):
-        with open(BASELINE_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+def ensure_record_defaults(records: list) -> list:
+    """
+    Ensures every record loaded from your existing GitHub `data/ods1_baseline.json`
+    automatically gets `last_active_rank` and an initial `history` entry if not already present,
+    so you never have to replace your GitHub data file manually.
+    """
+    for r in records:
+        curr_rank = str(r.get("rank", "") or "")
+        clean_rank = curr_rank.replace(" (Rotated)", "").strip()
+        if clean_rank not in ["R5", "R4", "R3", "R2", "R1"]:
+            clean_rank = "R3" if (float(r.get("rok_use_all", 0) or 0) >= 40 or float(r.get("kvk_dkp", 0) or 0) >= 1500000) else "R2"
+        if not r.get("last_active_rank"):
+            r["last_active_rank"] = clean_rank
+        if "history" not in r or not isinstance(r.get("history"), list) or len(r["history"]) == 0:
+            r["history"] = [{
+                "date": "Saved Baseline (data/ods1_baseline.json)",
+                "in_active": bool(r.get("in_active_126", False)),
+                "rank": curr_rank if curr_rank else clean_rank,
+                "last_active_rank": r["last_active_rank"],
+                "overall_score": float(r.get("overall_score", 0.0) or 0.0),
+                "ods1_usefulness": float(r.get("ods1_usefulness", 0.0) or 0.0),
+                "kvk_score": float(r.get("kvk_score", 0.0) or 0.0),
+                "power": float(r.get("power", 0.0) or 0.0),
+                "forts_7d": int(r.get("forts_7d", 0) or 0),
+                "tech_7d": int(r.get("tech_7d", 0) or 0),
+                "helps_7d": int(r.get("helps_7d", 0) or 0),
+                "build_7d": int(r.get("build_7d", 0) or 0),
+                "kvk_dkp": float(r.get("kvk_dkp", 0.0) or 0.0),
+            }]
+    return records
 
 
 def load_persistent_state() -> dict:
@@ -315,6 +341,7 @@ def load_persistent_state() -> dict:
         "notes": {},
         "snapshots": [],
         "movement_log": [],
+        "auto_ingested_files": [],
     }
     if os.path.exists(STATE_PATH):
         try:
@@ -332,42 +359,87 @@ def save_persistent_state(state: dict) -> None:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
-def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) -> tuple:
+def get_available_history_dates(records: list) -> list:
+    dates = set()
+    for r in records:
+        for h in r.get("history", []):
+            if h.get("date"):
+                dates.add(h["date"])
+    return sorted(list(dates), reverse=True)
+
+
+def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict, archive_label: str = None) -> tuple:
     """
-    Combines All-Time ODS1 exports + Current 7-Day ODS1 exports + KD 4161 KvK PlayersRanking.
-    Automatically detects who is currently in the alliance vs. who rotated out or left,
-    and logs joins/returns and leaves.
+    1. Archives current live week into each player's `history` list and locks their `last_active_rank`
+       before applying new uploads so you never lose past ranks or weekly stats.
+    2. Combines All-Time ODS1 exports + Current 7-Day ODS1 exports + KD 4161 KvK PlayersRanking
+       (works with both Streamlit UploadedFile objects and local file paths in `data/`).
+    3. Detects returning members and shows what rank they previously held.
     """
-    by_id = {int(r["id"]): dict(r) for r in base_records}
+    by_id = {int(r["id"]): dict(r) for r in ensure_record_defaults(base_records)}
     prev_active_ids = {gid for gid, rec in by_id.items() if rec.get("in_active_126", False)}
+    custom_ranks = state.get("custom_ranks", {})
+
+    snap_label = archive_label or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Archive current state into each player's `history` before overwriting with new files
+    if by_id:
+        for gid, rec in by_id.items():
+            str_id = str(gid)
+            curr_rk = custom_ranks.get(str_id, rec.get("rank", "R2"))
+            clean_rk = str(curr_rk).replace(" (Rotated)", "")
+            if rec.get("in_active_126", False) and clean_rk in ["R5", "R4", "R3", "R2", "R1"]:
+                rec["last_active_rank"] = clean_rk
+                rec["last_seen_in_ods1"] = snap_label.split(" ")[0]
+
+            hist = list(rec.get("history", []))
+            hist_tag = f"{snap_label} (Pre-Update)"
+            if not any(h.get("date") == hist_tag for h in hist):
+                hist.append({
+                    "date": hist_tag,
+                    "in_active": bool(rec.get("in_active_126", False)),
+                    "rank": curr_rk,
+                    "last_active_rank": rec.get("last_active_rank", clean_rk),
+                    "overall_score": float(rec.get("overall_score", 0.0) or 0.0),
+                    "ods1_usefulness": float(rec.get("ods1_usefulness", 0.0) or 0.0),
+                    "kvk_score": float(rec.get("kvk_score", 0.0) or 0.0),
+                    "power": float(rec.get("power", 0.0) or 0.0),
+                    "forts_7d": int(rec.get("forts_7d", 0) or 0),
+                    "tech_7d": int(rec.get("tech_7d", 0) or 0),
+                    "helps_7d": int(rec.get("helps_7d", 0) or 0),
+                    "build_7d": int(rec.get("build_7d", 0) or 0),
+                    "kvk_dkp": float(rec.get("kvk_dkp", 0.0) or 0.0),
+                })
+            rec["history"] = hist[-12:]
 
     alliance_7d_dfs = []
     alliance_alltime_dfs = []
     kvk_dfs = []
 
     for uf in uploaded_files:
+        fname = os.path.basename(uf) if isinstance(uf, str) else getattr(uf, "name", "uploaded.xlsx")
         try:
             xls = pd.ExcelFile(uf)
             sheet_name = "Data" if "Data" in xls.sheet_names else xls.sheet_names[0]
             df = pd.read_excel(uf, sheet_name=sheet_name)
         except Exception as e:
-            st.error(f"Failed to read {uf.name}: {e}")
+            st.error(f"Failed to read {fname}: {e}")
             continue
 
         cols = set(df.columns)
         if "Alliance helps" in cols and "Forts destroyed" in cols:
-            # Distinguish All-Time export from Current/7-Day export:
-            # All-Time exports have >165 rows (historical members) or much higher average forts (>150)
             avg_forts = df["Forts destroyed"].mean() if "Forts destroyed" in df.columns else 0
             is_alltime = (len(df) > 165) or (avg_forts > 130)
             if is_alltime:
-                alliance_alltime_dfs.append((uf.name, df))
+                alliance_alltime_dfs.append((fname, df))
             else:
-                alliance_7d_dfs.append((uf.name, df))
+                alliance_7d_dfs.append((fname, df))
         elif "Governor ID" in cols and ("DKP" in cols or "KP" in cols):
-            kvk_dfs.append((uf.name, df))
+            # Ignore 2.5MB+ multi-kingdom ranking exports if accidentally present so KD 4161 ranks stay accurate
+            if len(df) <= 1500:
+                kvk_dfs.append((fname, df))
 
-    # 1. Process All-Time ODS1 files first (updates historical totals & adds any missing historical members)
+    # 1. Process All-Time ODS1 files first
     for _, df in alliance_alltime_dfs:
         for _, row in df.iterrows():
             raw_id = row.get("ID")
@@ -383,6 +455,8 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                     "in_active_126": False,
                     "in_kvk_4161": False,
                     "is_new_joiner": False,
+                    "last_active_rank": "R2",
+                    "history": [],
                     "power": float(row.get("Power", 0) or 0),
                     "forts_7d": 0,
                     "forts_all": 0,
@@ -432,7 +506,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
             if pd.notna(row.get("Last login")):
                 rec["last_login"] = str(row["Last login"])
 
-    # 2. Process Current / 7-Day Alliance files (resets active flags so rotated/departed members are accurately detected!)
+    # 2. Process Current / 7-Day Alliance files
     joined_names = []
     left_names = []
 
@@ -445,12 +519,13 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                     continue
                 new_active_ids.add(int(raw_id))
 
-        # Mark anyone NOT in today's current 7d scan as rotated/departed and zero out their 7d stats
         for gid, rec in by_id.items():
             if gid not in new_active_ids:
                 if gid in prev_active_ids:
-                    left_names.append(f"{rec.get('name', gid)} ({gid})")
+                    prev_rk = rec.get("last_active_rank", "R2")
+                    left_names.append(f"{rec.get('name', gid)} (Was {prev_rk})")
                 rec["in_active_126"] = False
+                rec["returned_from_rotation"] = False
                 rec["forts_7d"] = 0
                 rec["tech_7d"] = 0
                 rec["helps_7d"] = 0
@@ -460,7 +535,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rok_act_7d"] = 0.0
                 rec["status"] = "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
 
-        # Update everyone present in today's 7d scan
         for _, df in alliance_7d_dfs:
             for _, row in df.iterrows():
                 raw_id = row.get("ID")
@@ -477,6 +551,8 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                         "in_active_126": True,
                         "in_kvk_4161": False,
                         "is_new_joiner": True,
+                        "last_active_rank": "New",
+                        "history": [],
                         "power": float(row.get("Power", 0) or 0),
                         "forts_7d": 0,
                         "forts_all": 0,
@@ -514,8 +590,13 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                     rec["aliases"] = sorted(list(aliases))
                     rec["name"] = p_name
 
-                if gov_id not in prev_active_ids and f"{rec['name']} ({gov_id})" not in joined_names:
-                    joined_names.append(f"{rec['name']} ({gov_id})")
+                if gov_id not in prev_active_ids:
+                    prev_rk = rec.get("last_active_rank", "New")
+                    label_str = f"{rec['name']} (Prev: {prev_rk})"
+                    if label_str not in joined_names:
+                        joined_names.append(label_str)
+                    if not is_brand_new:
+                        rec["returned_from_rotation"] = True
 
                 rec["in_active_126"] = True
                 rec["status"] = "Active in ODS1"
@@ -526,7 +607,6 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 rec["rss_7d"] = int(row.get("Resource assistance", rec.get("rss_7d", 0)) or 0)
                 rec["build_7d"] = int(row.get("Building time (seconds)", rec.get("build_7d", 0)) or 0)
 
-                # Ensure All-Time is at least 7d if no separate All-Time record existed for a new joiner
                 rec["forts_all"] = max(int(rec.get("forts_all", 0) or 0), rec["forts_7d"])
                 rec["tech_all"] = max(int(rec.get("tech_all", 0) or 0), rec["tech_7d"])
                 rec["helps_all"] = max(int(rec.get("helps_all", 0) or 0), rec["helps_7d"])
@@ -539,7 +619,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
                 if pd.notna(row.get("Last login")):
                     rec["last_login"] = str(row["Last login"])
 
-    # 3. Process Kingdom 4161 KvK PlayersRanking (strict Left Join onto ODS1 members)
+    # 3. Process Kingdom 4161 KvK PlayersRanking
     for _, df in kvk_dfs:
         df_sorted = df.reset_index(drop=True).copy()
         df_sorted["KD_Rank_Calc"] = np.arange(1, len(df_sorted) + 1)
@@ -580,7 +660,7 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
 
     if joined_names or left_names:
         state.setdefault("movement_log", []).insert(0, {
-            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+            "timestamp": snap_label,
             "joined": joined_names,
             "left": left_names,
         })
@@ -592,7 +672,35 @@ def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict) 
         "joined_count": len(joined_names),
         "left_count": len(left_names),
     }
-    return list(by_id.values()), summary
+    return ensure_record_defaults(list(by_id.values())), summary
+
+
+def load_initial_repository_data(state: dict) -> tuple:
+    """
+    Directly reads whatever files are stored inside your GitHub `data/` folder:
+    - Loads `data/ods1_baseline.json` (and automatically upgrades all records with `last_active_rank` & `history`).
+    - Also scans `data/*.xlsx` and `data/*.xls` in case you uploaded raw ROKSTATS Excel files directly into your GitHub `data/` folder!
+    """
+    records = []
+    source_files = []
+
+    if os.path.exists(BASELINE_PATH):
+        try:
+            with open(BASELINE_PATH, "r", encoding="utf-8") as f:
+                records = ensure_record_defaults(json.load(f))
+            source_files.append("ods1_baseline.json")
+        except Exception as e:
+            st.error(f"Error reading data/ods1_baseline.json: {e}")
+
+    # Also check if there are any raw .xlsx / .xls files committed inside `data/`
+    excel_paths = sorted(
+        glob.glob(os.path.join(DATA_DIR, "*.xlsx")) + glob.glob(os.path.join(DATA_DIR, "*.xls"))
+    )
+    if excel_paths:
+        records, _ = merge_uploaded_files(records, excel_paths, state, archive_label="GitHub data/ Excel Sync")
+        source_files.extend([os.path.basename(p) for p in excel_paths])
+
+    return records, source_files
 
 
 def score_and_classify(
@@ -602,6 +710,8 @@ def score_and_classify(
     r3_cutoff: float,
     spec_threshold: float,
     auto_update_ranks: bool,
+    restore_returning_ranks: bool = True,
+    snapshot_date: str = "Current Live Roster",
 ) -> pd.DataFrame:
     if phase_mode == "Early KvK (Forts & Flags Focus)":
         w_use, w_kvk = 0.55, 0.45
@@ -618,22 +728,49 @@ def score_and_classify(
     for r in records:
         gov_id = int(r["id"])
         str_id = str(gov_id)
-        in_active = bool(r.get("in_active_126", False))
+
+        # If viewing a historical snapshot, pull that week's stats for this player
+        hist_entry = None
+        if snapshot_date != "Current Live Roster":
+            for h in r.get("history", []):
+                if h.get("date") == snapshot_date:
+                    hist_entry = h
+                    break
+
+        if hist_entry is not None:
+            in_active = bool(hist_entry.get("in_active", False))
+            power = float(hist_entry.get("power", r.get("power", 0)) or 0)
+            forts_7d = int(hist_entry.get("forts_7d", 0) or 0)
+            tech_7d = int(hist_entry.get("tech_7d", 0) or 0)
+            helps_7d = int(hist_entry.get("helps_7d", 0) or 0)
+            build_7d = int(hist_entry.get("build_7d", 0) or 0)
+            kvk_dkp = float(hist_entry.get("kvk_dkp", r.get("kvk_dkp", 0)) or 0)
+        else:
+            in_active = bool(r.get("in_active_126", False))
+            power = float(r.get("power", 0) or 0)
+            forts_7d = int(r.get("forts_7d", 0) or 0)
+            tech_7d = int(r.get("tech_7d", 0) or 0)
+            helps_7d = int(r.get("helps_7d", 0) or 0)
+            build_7d = int(r.get("build_7d", 0) or 0)
+            kvk_dkp = float(r.get("kvk_dkp", 0) or 0)
+
         in_kvk = bool(r.get("in_kvk_4161", False))
-        power = float(r.get("power", 0) or 0)
-        forts_7d = int(r.get("forts_7d", 0) or 0)
-        tech_7d = int(r.get("tech_7d", 0) or 0)
-        helps_7d = int(r.get("helps_7d", 0) or 0)
-        build_7d = int(r.get("build_7d", 0) or 0)
         forts_all = int(r.get("forts_all", 0) or 0)
         tech_all = int(r.get("tech_all", 0) or 0)
         helps_all = int(r.get("helps_all", 0) or 0)
         build_all = int(r.get("build_all", 0) or 0)
-        kvk_dkp = float(r.get("kvk_dkp", 0) or 0)
         kvk_kp = float(r.get("kvk_kp", 0) or 0)
         kvk_healed = float(r.get("kvk_healed", 0) or 0)
         kvk_acclaim = float(r.get("kvk_acclaim", 0) or 0)
         rok_use_all = int(r.get("rok_use_all", 0) or 0)
+        last_active_rank = str(r.get("last_active_rank", "R2") or "R2")
+        returned_flag = bool(r.get("returned_from_rotation", False))
+
+        # Look up previous snapshot's rank & score for week-over-week comparison
+        hist_list = r.get("history", [])
+        prev_snap = hist_list[-1] if hist_list else None
+        prev_week_score = float(prev_snap.get("overall_score", 0.0)) if prev_snap else 0.0
+
         is_new = bool(
             in_active
             and forts_all == forts_7d
@@ -642,7 +779,6 @@ def score_and_classify(
         )
 
         if in_active:
-            # Calibrated to match ROKSTATS native Usefulness scale (200 forts = 52 pts, 100k tech = 20 pts, 25h flags = 20 pts, 2.5k helps = 8 pts)
             s_forts = min(forts_7d / 200.0, 1.0) * 52.0
             s_tech = min(tech_7d / 100000.0, 1.0) * 20.0
             s_build = min(build_7d / 90000.0, 1.0) * 20.0
@@ -665,6 +801,7 @@ def score_and_classify(
         kvk_score = round(min(r_score + h_bonus + a_bonus, 100.0), 1)
 
         overall = round(min((w_use * use_score) + (w_kvk * kvk_score), 100.0), 1)
+        score_delta = round(overall - prev_week_score, 1) if prev_snap else 0.0
 
         is_excused = gov_id in excused_set
         is_specialist = (use_score >= spec_threshold) or (kvk_score >= 75.0)
@@ -684,18 +821,23 @@ def score_and_classify(
                 or "ᴼᴰ" in str(r.get("name", ""))
                 or "OD" in str(r.get("name", ""))
             ):
-                rec_rank = "R3" if kvk_dkp >= 1500000 else "R2"
+                rec_rank = last_active_rank if last_active_rank in ["R3", "R2"] else ("R3" if kvk_dkp >= 1500000 else "R2")
                 bucket = "Rotated Out (Active KD)"
-                reason = "Rotated out in KD 4161"
+                reason = f"Rotated out in KD 4161 (Held {last_active_rank})"
             else:
                 rec_rank = "Left"
                 bucket = "Departed / Left"
-                reason = "Not in active scan or KD 4161"
+                reason = f"Left ODS1 (Last Rank: {last_active_rank})"
         else:
             if is_excused:
-                rec_rank = custom_ranks.get(str_id, "R2")
+                rec_rank = custom_ranks.get(str_id, last_active_rank)
                 bucket = "Excused (Protected)"
-                reason = "Excused / rebuild protection"
+                reason = f"Excused / rebuild protection (Held {last_active_rank})"
+            elif returned_flag and restore_returning_ranks and last_active_rank in ["R3", "R2"]:
+                calc_rank = "R3" if (is_specialist or overall >= r3_cutoff) else "R2"
+                rec_rank = "R3" if (last_active_rank == "R3" or calc_rank == "R3") else "R2"
+                bucket = "Promote / Keep R3" if rec_rank == "R3" else "Keep (R2 Core)"
+                reason = f"Returned from rotation — Restored {last_active_rank}"
             elif is_specialist or overall >= r3_cutoff:
                 rec_rank = "R3"
                 bucket = "Promote / Keep R3"
@@ -703,26 +845,33 @@ def score_and_classify(
             elif overall >= 24.0 or use_score >= 30.0 or kvk_score >= 40.0:
                 rec_rank = "R2"
                 bucket = "Keep (R2 Core)"
-                reason = "Standard contributor"
+                reason = f"Standard contributor (Prev: {last_active_rank})"
             elif overall >= 12.0 or rok_use_all >= 30:
                 rec_rank = "R1"
                 bucket = "Monitor / Warn (R1)"
-                reason = "Veteran slump (All-Time Use ≥30) — check in" if rok_use_all >= 30 else "Below standard — warn"
+                reason = f"Veteran slump (Was {last_active_rank}) — check in" if rok_use_all >= 30 else f"Below standard (Was {last_active_rank}) — warn"
             else:
                 rec_rank = "Kick"
                 bucket = "Kick Candidate"
-                reason = "Low Usefulness & low KvK"
+                reason = f"Low Usefulness & low KvK (Was {last_active_rank})"
 
-        saved_rank = custom_ranks.get(str_id)
-        if auto_update_ranks:
-            active_rank = rec_rank
-            custom_ranks[str_id] = rec_rank
+        if hist_entry is not None:
+            active_rank = str(hist_entry.get("rank", rec_rank))
         else:
-            active_rank = saved_rank if saved_rank else rec_rank
+            saved_rank = custom_ranks.get(str_id)
+            if auto_update_ranks:
+                active_rank = rec_rank
+                custom_ranks[str_id] = rec_rank
+            else:
+                active_rank = saved_rank if saved_rank else rec_rank
+
+            if in_active and active_rank in ["R5", "R4", "R3", "R2", "R1"]:
+                r["last_active_rank"] = active_rank
 
         rows.append({
             **r,
             "id": gov_id,
+            "in_active_126": in_active,
             "power": power,
             "power_m": round(power / 1e6, 2),
             "forts_7d": forts_7d,
@@ -746,6 +895,8 @@ def score_and_classify(
             "ods1_usefulness": use_score,
             "kvk_score": kvk_score,
             "overall_score": overall,
+            "score_delta": score_delta,
+            "last_active_rank": last_active_rank,
             "is_specialist": is_specialist,
             "is_excused": is_excused,
             "is_new_joiner": is_new,
@@ -758,6 +909,8 @@ def score_and_classify(
         })
 
     df_out = pd.DataFrame(rows)
+    if df_out.empty:
+        return df_out
     return df_out.sort_values(by=["overall_score", "kvk_dkp"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -767,10 +920,12 @@ def render_table(df: pd.DataFrame) -> None:
         "name": st.column_config.TextColumn("Governor", width="medium"),
         "alias_str": st.column_config.TextColumn("Former Name(s)", width="small"),
         "rank": st.column_config.TextColumn("Rank", width="small"),
+        "last_active_rank": st.column_config.TextColumn("Prev Rank", width="small"),
         "bucket": st.column_config.TextColumn("Decision Bucket", width="medium"),
         "overall_score": st.column_config.ProgressColumn(
             "Overall Score", min_value=0, max_value=100, format="%.1f"
         ),
+        "score_delta": st.column_config.NumberColumn("vs Last Snapshot", format="%+.1f"),
         "ods1_usefulness": st.column_config.ProgressColumn(
             "7d Usefulness", min_value=0, max_value=100, format="%.1f"
         ),
@@ -825,12 +980,8 @@ def build_discord_briefing(df: pd.DataFrame, phase_mode: str) -> str:
     r3_list = active[active["rank"] == "R3"]["name"].tolist()
     warn_list = active[active["bucket"] == "Monitor / Warn (R1)"]["name"].tolist()
     kick_list = active[active["bucket"] == "Kick Candidate"]["name"].tolist()
-    rot_list = (
-        df[df["bucket"] == "Rotated Out (Active KD)"]
-        .sort_values(by="kvk_dkp", ascending=False)["name"]
-        .head(12)
-        .tolist()
-    )
+    rot_df = df[df["bucket"] == "Rotated Out (Active KD)"].sort_values(by="kvk_dkp", ascending=False).head(12)
+    rot_list = [f"{row['name']} (Held {row['last_active_rank']})" for _, row in rot_df.iterrows()]
 
     lines = [
         f"**ODS1 (KD 4161) — KvK 1 Briefing | {phase_mode}**",
@@ -848,17 +999,43 @@ if "state" not in st.session_state:
     st.session_state.state = load_persistent_state()
 
 if "base_records" not in st.session_state:
-    st.session_state.base_records = load_baseline_records()
+    recs, src_files = load_initial_repository_data(st.session_state.state)
+    st.session_state.base_records = recs
+    st.session_state.loaded_sources = src_files
 
 state = st.session_state.state
+avail_dates = get_available_history_dates(st.session_state.base_records)
 
 # --- CLEAN, SIMPLIFIED SIDEBAR ---
 with st.sidebar:
     st.markdown("## ⚔️ ODS1 Command")
-    st.caption("Kingdom 4161 • All-Time + Current Merger")
+    st.caption("Kingdom 4161 • GitHub `data/` Auto-Loader")
+
+    # Show what files were read from the GitHub `data/` folder
+    loaded_srcs = st.session_state.get("loaded_sources", ["ods1_baseline.json"])
+    st.caption(f"📂 Loaded from `data/`: **{', '.join(loaded_srcs)}**")
+    if st.button("🔄 Reload `data/` Folder from Disk", use_container_width=True):
+        recs, src_files = load_initial_repository_data(state)
+        st.session_state.base_records = recs
+        st.session_state.loaded_sources = src_files
+        st.success(f"Reloaded {len(recs)} accounts from `data/`!")
+        st.rerun()
+
+    st.markdown("---")
+
+    # Time Machine / Snapshot Selector
+    st.markdown("### 🕒 Roster Time Machine")
+    snapshot_date = st.selectbox(
+        "View Current or Past Week",
+        options=["Current Live Roster"] + avail_dates,
+        index=0,
+        help="Switch between your Current Live Roster and archived weekly snapshots.",
+    )
+
+    st.markdown("---")
 
     # 1. Simple Upload Box (Supports All-Time + Current 7d + KvK together!)
-    st.markdown("### 1. Upload All-Time + Current Data")
+    st.markdown("### 1. Upload New ROKSTATS Files")
     uploaded_files = st.file_uploader(
         "Drop All-Time, Current 7d, or KvK .xlsx files",
         type=["xlsx", "xls"],
@@ -879,10 +1056,11 @@ with st.sidebar:
             })
             save_persistent_state(state)
             st.success(
-                f"Merged {summary['alltime_files']} All-Time, {summary['current_7d_files']} Current 7d, "
-                f"and {summary['kvk_files']} KvK file(s)! "
+                f"Archived previous snapshot & merged {summary['alltime_files']} All-Time, "
+                f"{summary['current_7d_files']} Current 7d, and {summary['kvk_files']} KvK file(s)! "
                 f"(+{summary['joined_count']} joined/returned, -{summary['left_count']} rotated/left)"
             )
+            st.rerun()
 
     st.markdown("---")
 
@@ -908,7 +1086,8 @@ with st.sidebar:
             • <b>R3 (Top ~30%):</b> Score <b>45+</b> OR Specialist (<b>55+</b> Usefulness or <b>75+</b> KvK)<br>
             • <b>R2 (Core):</b> Score <b>24 – 44</b><br>
             • <b>R1 (Warn):</b> Score <b>12 – 23</b> (or All-Time Veteran Slump)<br>
-            • <b>Kick:</b> Score <b>Under 12</b> (Low Current &amp; Low All-Time)
+            • <b>Kick:</b> Score <b>Under 12</b> (Low Current &amp; Low All-Time)<br>
+            • <b>Prev Rank Memory:</b> Automatically reads &amp; preserves each member's rank from your <code>data/</code> folder.
         </div>
         """,
         unsafe_allow_html=True,
@@ -919,6 +1098,7 @@ with st.sidebar:
         r3_cutoff = st.slider("R3 Score Requirement", min_value=30.0, max_value=75.0, value=45.0, step=1.0)
         spec_threshold = st.slider("Specialist Usefulness Score", min_value=40.0, max_value=85.0, value=55.0, step=1.0)
         auto_update_ranks = st.toggle("Auto-Assign Ranks on Upload", value=True)
+        restore_returning_ranks = st.toggle("Auto-Restore Rank When Rotated Member Returns", value=True)
         st.markdown("---")
         baseline_json_str = json.dumps(st.session_state.base_records, ensure_ascii=False, indent=2)
         st.download_button(
@@ -927,7 +1107,7 @@ with st.sidebar:
             file_name="ods1_baseline.json",
             mime="application/json",
             use_container_width=True,
-            help="Upload this file to your GitHub data/ folder anytime you want to permanently lock in new Excel uploads.",
+            help="Upload this file to your GitHub data/ folder anytime you want to permanently lock in new Excel uploads and past week history.",
         )
         state_json_str = json.dumps(state, ensure_ascii=False, indent=2)
         st.download_button(
@@ -945,6 +1125,8 @@ df_all = score_and_classify(
     r3_cutoff=r3_cutoff,
     spec_threshold=spec_threshold,
     auto_update_ranks=auto_update_ranks,
+    restore_returning_ranks=restore_returning_ranks,
+    snapshot_date=snapshot_date,
 )
 save_persistent_state(state)
 
@@ -965,7 +1147,7 @@ st.markdown(
     <div class="hero-banner">
         <div>
             <h1 class="hero-title">⚔️ ODYSSEY1 (ODS1) Command Center</h1>
-            <div class="hero-sub">Kingdom 4161 • All-Time History + Current 7-Day Activity + KvK War Performance</div>
+            <div class="hero-sub">Kingdom 4161 • Viewing: <b>{snapshot_date}</b> • Powered by GitHub <code>data/</code> Folder</div>
         </div>
         <div class="hero-badges">
             <span class="pill-gold">{phase_mode}</span>
@@ -1038,9 +1220,9 @@ tabs = st.tabs([
     "Rank & Briefing",
 ])
 
-# TAB 0: Visual Separated Decision Buckets (Shows both 7d and All-Time side by side!)
+# TAB 0: Visual Separated Decision Buckets
 with tabs[0]:
-    st.caption("Compares each player's Current 7-Day stats alongside their All-Time ODS1 history so veterans in a temporary 1-week slump are never mistaken for deadweight.")
+    st.caption("Automatically reads your existing `data/` files, tracks `Prev Rank` (the rank each player held before rotating out or before the latest reset), and calculates `vs Last Snapshot` score changes.")
     active_filtered = filtered_df[filtered_df["in_active_126"]].copy()
 
     bucket_specs = [
@@ -1052,7 +1234,8 @@ with tabs[0]:
     ]
 
     cols_bucket = [
-        "name", "id", "rank", "overall_score", "ods1_usefulness", "rok_use_all", "kvk_score",
+        "name", "id", "rank", "last_active_rank", "overall_score", "score_delta",
+        "ods1_usefulness", "rok_use_all", "kvk_score",
         "power_m", "kvk_dkp_m", "forts_7d", "forts_all", "tech_7d", "build_hrs_7d", "reason"
     ]
 
@@ -1074,7 +1257,7 @@ with tabs[1]:
     )
     view_df = filtered_df[filtered_df["bucket"].isin(bucket_sel)] if bucket_sel else filtered_df
     render_table(view_df[[
-        "name", "alias_str", "id", "rank", "bucket", "overall_score",
+        "name", "alias_str", "id", "rank", "last_active_rank", "bucket", "overall_score", "score_delta",
         "ods1_usefulness", "rok_use_all", "kvk_score", "power_m", "kvk_dkp_m",
         "forts_7d", "forts_all", "tech_7d", "tech_all", "helps_7d", "helps_all", "build_hrs_7d", "reason"
     ]])
@@ -1083,7 +1266,7 @@ with tabs[1]:
 with tabs[2]:
     u_scope = st.radio(
         "Scope",
-        ["Current 7-Day Usefulness (With All-Time Reference)", "All-Time ODS1 Usefulness (258 Historical Accounts)"],
+        ["Current 7-Day Usefulness (With All-Time Reference)", f"All-Time ODS1 Usefulness ({len(df_all)} Historical Accounts)"],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1091,14 +1274,14 @@ with tabs[2]:
         u_df = filtered_df[filtered_df["in_active_126"]].sort_values(by="ods1_usefulness", ascending=False)
         render_podium(u_df, "ods1_usefulness", " / 100 (7d)")
         render_table(u_df[[
-            "name", "id", "rank", "ods1_usefulness", "rok_use_all",
+            "name", "id", "rank", "last_active_rank", "ods1_usefulness", "rok_use_all",
             "forts_7d", "forts_all", "tech_7d", "tech_all", "helps_7d", "build_hrs_7d", "reason"
         ]])
     else:
         u_df = filtered_df.sort_values(by="rok_use_all", ascending=False)
         render_podium(u_df, "forts_all", " All-Time Forts")
         render_table(u_df[[
-            "name", "alias_str", "id", "status", "rok_use_all", "ods1_usefulness",
+            "name", "alias_str", "id", "status", "last_active_rank", "rok_use_all", "ods1_usefulness",
             "forts_all", "forts_7d", "tech_all", "helps_all", "build_hrs_all", "power_m", "kvk_dkp_m"
         ]])
 
@@ -1107,7 +1290,7 @@ with tabs[3]:
     k_df = filtered_df[filtered_df["in_kvk_4161"]].sort_values(by="kvk_dkp", ascending=False)
     render_podium(k_df, "kvk_dkp", " DKP")
     render_table(k_df[[
-        "kd_rank", "name", "alias_str", "id", "status", "rank",
+        "kd_rank", "name", "alias_str", "id", "status", "rank", "last_active_rank",
         "kvk_score", "power_m", "kvk_kp_m", "kvk_dkp_m", "dkp_ratio_pct", "kvk_healed_k", "forts_all"
     ]])
 
@@ -1153,11 +1336,11 @@ with tabs[4]:
             render_podium(h_top, "build_hrs_all", "h All-Time Flags")
             render_table(h_top[["name", "status", "build_hrs_all", "helps_all", "rok_use_all"]].head(25))
 
-# TAB 5: Joins, Leaves, Rotations & Aliases
+# TAB 5: Joins, Leaves, Rotations & Aliases (With Prev Rank Memory!)
 with tabs[5]:
     if state.get("movement_log"):
-        st.markdown("#### 📋 Recent Roster Movement Log (Joins & Leaves Detected Across Uploads)")
-        for entry in state["movement_log"][:5]:
+        st.markdown("#### 📋 Recent Roster Movement Log (Shows Previous Rank for Every Join & Leave)")
+        for entry in state["movement_log"][:6]:
             st.info(
                 f"**{entry['timestamp']}** — "
                 f"**Joined / Returned ({len(entry['joined'])}):** {', '.join(entry['joined']) if entry['joined'] else 'None'} | "
@@ -1166,35 +1349,35 @@ with tabs[5]:
 
     col_rot, col_aka = st.columns([1.35, 1.0])
     with col_rot:
-        st.markdown("#### 🔁 Rotated Out of ODS1 (In All-Time File, Not in Current 7d File, Active in KD 4161)")
+        st.markdown("#### 🔁 Rotated Out of ODS1 (Shows Last Rank Held in ODS1)")
         render_table(rotated_df.sort_values(by="kvk_dkp", ascending=False)[[
-            "name", "alias_str", "id", "kd_rank", "power_m", "kvk_dkp_m", "forts_all", "rok_use_all"
+            "name", "last_active_rank", "alias_str", "id", "kd_rank", "power_m", "kvk_dkp_m", "forts_all", "rok_use_all"
         ]])
     with col_aka:
         st.markdown("#### 🏷️ Detected Name Changes (All-Time vs. Current / KvK)")
         changed_df = df_all[df_all["alias_str"].str.len() > 0]
         render_table(changed_df[[
-            "name", "alias_str", "id", "status", "kvk_dkp_m"
+            "name", "alias_str", "last_active_rank", "id", "status", "kvk_dkp_m"
         ]])
 
-    with st.expander(f"🚪 View Departed / Inactive Historical Accounts ({len(departed_df)} accounts)", expanded=False):
+    with st.expander(f"🚪 View Departed / Inactive Historical Accounts ({len(departed_df)} accounts — with Last Held Rank)", expanded=False):
         render_table(departed_df.sort_values(by="forts_all", ascending=False)[[
-            "name", "alias_str", "id", "power_m", "forts_all", "tech_all", "rok_use_all"
+            "name", "last_active_rank", "alias_str", "id", "power_m", "forts_all", "tech_all", "rok_use_all"
         ]])
 
-# TAB 6: Rank Override & Discord Briefing
+# TAB 6: Rank Override, Player History Inspector & Discord Briefing
 with tabs[6]:
-    col_mgr, col_disc = st.columns([1.1, 1.2])
+    col_mgr, col_disc = st.columns([1.15, 1.15])
     with col_mgr:
-        st.markdown("#### ✏️ Manual Rank Override & Excused Toggle")
+        st.markdown("#### ✏️ Manual Rank Override & Player History")
         sel_player = st.selectbox(
             "Select Governor",
             options=df_all["id"].tolist(),
-            format_func=lambda gid: f"{df_all[df_all['id']==gid]['name'].values[0]} ({gid}) — {df_all[df_all['id']==gid]['rank'].values[0]}",
+            format_func=lambda gid: f"{df_all[df_all['id']==gid]['name'].values[0]} ({gid}) — Curr: {df_all[df_all['id']==gid]['rank'].values[0]} | Prev: {df_all[df_all['id']==gid]['last_active_rank'].values[0]}",
         )
         curr_row = df_all[df_all["id"] == sel_player].iloc[0]
         new_rank_choice = st.selectbox(
-            "Set Saved Rank",
+            "Set Saved Rank (Also updates their Last Active Rank memory)",
             ["R5", "R4", "R3", "R2", "R1", "Kick"],
             index=["R5", "R4", "R3", "R2", "R1", "Kick"].index(curr_row["rank"]) if curr_row["rank"] in ["R5", "R4", "R3", "R2", "R1", "Kick"] else 3,
         )
@@ -1203,6 +1386,9 @@ with tabs[6]:
 
         if st.button("💾 Save Override", type="primary"):
             state["custom_ranks"][str(sel_player)] = new_rank_choice
+            for rec in st.session_state.base_records:
+                if int(rec["id"]) == int(sel_player) and new_rank_choice in ["R5", "R4", "R3", "R2", "R1"]:
+                    rec["last_active_rank"] = new_rank_choice
             exc_list = set(int(x) for x in state.get("excused_ids", []))
             if excused_choice:
                 exc_list.add(int(sel_player))
@@ -1211,8 +1397,15 @@ with tabs[6]:
             state["excused_ids"] = sorted(list(exc_list))
             state["notes"][str(sel_player)] = note_choice
             save_persistent_state(state)
-            st.success("Saved.")
+            st.success("Saved rank and updated Previous Rank memory.")
             st.rerun()
+
+        # Show this player's archived weekly history snapshots
+        raw_rec = next((r for r in st.session_state.base_records if int(r["id"]) == int(sel_player)), None)
+        if raw_rec and raw_rec.get("history"):
+            st.markdown("##### 🕒 Archived Weekly Snapshots for Selected Governor")
+            hist_df = pd.DataFrame(raw_rec["history"])
+            st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
     with col_disc:
         st.markdown("#### 📋 1-Click Discord / R4 Briefing")
