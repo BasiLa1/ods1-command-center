@@ -279,7 +279,7 @@ def rotations_page(scored):
         st.caption("Read-only · Blank fields were absent from the saved report.")
         frame_table(snapshot_rows(members, label), "snapshot")
     elif mode == "Movement log":
-        events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", [])]
+        events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", []) if e.get("type") != "First seen"]
         frame_table([{"Report date": d, "Governor": name, "Movement": e.get("type"), "Previous rank": e.get("rank")}
                      for d, name, e in sorted(events, key=lambda item: item[0], reverse=True)], "events",
                     "No dated roster movements have been recorded for this selection.")
@@ -317,6 +317,12 @@ def member_detail(scored, preferred=None):
          f' · Suggested <b>{esc(rec["proposed"] or "—")}</b></p><p>{esc(rec["reason"])}</p></div>')
     stats([("Overall", f'{rec["overall"]:.1f}', "Score out of 100"), ("Support", f'{rec["support"]:.1f}', "Alliance usefulness"),
            ("KvK", f'{rec["war"]:.1f}', "War contribution"), ("Power", compact(db.n(rec.get("power"))), "Recorded power")])
+    report_days = [day for h in rec.get("history", []) if h.get("in_active")
+                   and (day := db.iso_day(h.get("date")))]
+    first_report = min(report_days).strftime("%d %b %Y") if report_days else "No weekly record"
+    joined = db.iso_day(rec.get("joined_date"))
+    st.caption(f"Earliest weekly report (end date) · {first_report} · Alliance join date: "
+               f"{joined.strftime('%d %b %Y') if joined else 'Unknown'}")
     expected_key = f"seen_officer_{gid}"
     expected = st.session_state.setdefault(expected_key, db.officer_values(rec))
     with st.form(f"officer_form_{gid}"):

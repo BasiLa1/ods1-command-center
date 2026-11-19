@@ -120,12 +120,10 @@ def former_rank(rec):
 def badge(rec, on_day):
     if not rec.get("in_active_126"):
         return ""
-    for field, label in (("returned_date", "Returned"), ("joined_date", "New"), ("first_seen_ods1", "First seen")):
+    for field, label in (("returned_date", "Back on roster"), ("joined_date", "Joined")):
         observed = iso_day(rec.get(field))
         if observed and 0 <= (on_day - observed).days < 14:
             return f"{label} · {observed.strftime('%b')} {observed.day}"
-    if rec.get("is_new_joiner") and not any(rec.get(k) for k in ("joined_date", "first_seen_ods1", "returned_date")):
-        return "Join date unknown"
     return ""
 
 
@@ -559,9 +557,6 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                         imported_event(rec, report_day, "Returned")
                     else:
                         joined.add(gid)
-                        rec["first_seen_ods1"] = report_day
-                        rec["is_new_joiner"] = True
-                        imported_event(rec, report_day, "First seen")
                 rec["in_active_126"] = True
                 if rank_code(row.get("rank")):
                     rec["rank"] = rank_code(row["rank"])
@@ -599,7 +594,7 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                 if item.get("date") == report_day:
                     hist[index] = snapshot(rec, rules, report_day)
                     break
-    return f"Updated {len(touched)} governors · {len(joined)} first seen · {len(returned)} returned · {len(departed)} left."
+    return f"Updated {len(touched)} governors · {len(joined)} first appearances in weekly reports · {len(returned)} returned · {len(departed)} left."
 
 
 class OlderReports(ValueError):
