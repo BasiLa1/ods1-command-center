@@ -24,7 +24,7 @@ BASELINE = "ods1_baseline.json"
 CLEAN_DATA_DIR = DATA_DIR / "clean-reports"
 LEGACY_STATE = "ods1_persistent_state.json"
 RANKS = ("R5", "R4", "R3", "R2", "R1")
-ACTIONS = ("Keep current rank", "Promote", "Demote", "Monitor / warn", "Kick")
+ACTIONS = ("Keep current rank", "Promote", "Demote", "Monitor / warn", "Kick", "Review suggested rank")
 PHASES = {"Early KvK": (0.55, 0.45), "Mid KvK": (0.50, 0.50), "Late KvK": (0.30, 0.70)}
 DEFAULT_RULES = ("Early KvK", 45.0, 55.0)
 COMMAND = {
@@ -175,12 +175,12 @@ def classify(rec, rules=DEFAULT_RULES):
 
     if not active:
         action = None
-    elif gid in COMMAND or rec.get("is_excused") or (rec.get("restore_this_report") and previous == held):
+    elif rec.get("is_excused") or (held and (gid in COMMAND or (rec.get("restore_this_report") and previous == held))):
         action = ACTIONS[0] if held else ACTIONS[3]
-    elif not held:
-        action, reason = ACTIONS[3], f"Confirm saved rank · {reason}"
     elif proposed == "Kick":
         action = ACTIONS[4]
+    elif not held:
+        action = "Review suggested rank"
     elif proposed == "R1" and held == "R1":
         action = ACTIONS[3]
     elif proposed == held:
@@ -691,6 +691,7 @@ def load_live(directory=DATA_DIR):
     records = read_records(directory)
     pending = []
     scheduled = {}
+    complete_days = set()
     for path in repository_reports(directory):
         try:
             data = path.read_bytes()
@@ -712,17 +713,23 @@ def load_live(directory=DATA_DIR):
                 pending.append(f"Confirm whether {path.name} is a weekly or all-time report in Officer desk.")
                 continue
             latest = max((r.get("source_dates", {}).get(kind, "") for r in records), default="")
-            if latest >= day.isoformat():
+            complete = kind == WEEK and path.name.lower().startswith("ods1-complete-weekly-")
+            digest = hashlib.sha256(data).hexdigest()
+            partial_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, False)).encode()).hexdigest()
+            upgrade_partial = complete and any(r.get("source_fingerprints", {}).get(WEEK) == partial_fingerprint for r in records)
+            if latest > day.isoformat() or (latest == day.isoformat() and not upgrade_partial):
                 continue
             rows = report_data(path.name, frame, kind)
-            scheduled.setdefault(day.isoformat(), []).append((kind, hashlib.sha256(data).hexdigest(), rows))
+            scheduled.setdefault(day.isoformat(), []).append((kind, digest, rows))
+            if complete:
+                complete_days.add(day.isoformat())
         except (OSError, ValueError, ImportError) as exc:
             pending.append(f"{path.name} · {exc}")
     for label, batch in sorted(scheduled.items()):
         try:
             # Missing members only leave when an officer confirms a complete roster.
             updated = copy.deepcopy(records)
-            merge_reports(updated, batch, label, complete=False)
+            merge_reports(updated, batch, label, complete=label in complete_days)
             records = updated
         except ValueError as exc:
             pending.append(f"{label} · {exc}")

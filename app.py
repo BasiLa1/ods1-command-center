@@ -12,8 +12,8 @@ import roster as db
 
 
 VIEWS = ("Roster review", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
-PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4}
-ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick")))
+PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4, "Review suggested rank": 2}
+ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick", "promote")))
 SHORT_ACTION = {"Keep current rank": "Keep", "Kick": "Kick review"}
 CSS = """
 <style>
@@ -118,25 +118,26 @@ def review_page(scored):
     active = [r for r in scored if r["in_active_126"]]
     counts = {action: sum(r["action"] == action for r in active) for action in db.ACTIONS}
     stats([("Active roster", len(active), "In the saved ODS1 roster"),
-           ("Rank changes", counts["Promote"] + counts["Demote"], f'{counts["Promote"]} promote · {counts["Demote"]} demote'),
+           ("Rank suggestions", counts["Promote"] + counts["Demote"] + counts["Review suggested rank"], f'{counts["Promote"]} promote · {counts["Demote"]} demote · {counts["Review suggested rank"]} to review'),
            ("Check-ins", counts["Monitor / warn"], "Monitor / warn queue"),
            ("Kick review", counts["Kick"], "Officer decision required")])
     heading, upload = st.columns([4, 1])
     with heading:
         title("Weekly review", f"{len(active)} active governors")
     upload.button("Import reports", type="primary", on_click=open_import, key="open_import", use_container_width=True)
-    a, b, c = st.columns([2.1, 1.15, 1])
+    a, b, c, d = st.columns([2.1, 1.3, 1, 1])
     query = a.text_input("Find a governor", placeholder="Name, alias or Governor ID", key="review_search")
     action = b.selectbox("Decision", ("All decisions", *db.ACTIONS), key="action_filter")
     rank = c.selectbox("Saved rank", ("All ranks", *db.RANKS, "Unrecorded"), key="rank_filter")
-    selected = [r for r in active if matches(r, query) and (action == "All decisions" or r["action"] == action)
+    target = d.selectbox("Suggested rank", ("All suggestions", *db.RANKS, "Kick"), key="target_filter")
+    selected = [r for r in active if (target == "All suggestions" or r["proposed"] == target) and matches(r, query) and (action == "All decisions" or r["action"] == action)
                 and (rank == "All ranks" or (r["held"] or "Unrecorded") == rank)]
     selected.sort(key=lambda r: (PRIORITY[r["action"]], -r["overall"] if r["action"] in ("Promote", "Keep current rank") else r["overall"],
                                 r["name"].casefold(), r["id"]))
     if not selected:
         st.info("No governors match these filters.")
         return
-    signature = (query, action, rank)
+    signature = (query, action, rank, target)
     if st.session_state.get("review_signature") != signature:
         st.session_state.review_page = 1
         st.session_state.review_signature = signature
@@ -148,9 +149,10 @@ def review_page(scored):
         joined = db.badge(rec, db.utc_day())
         tag = f'<span class="join-tag">{esc(joined)}</span>' if joined else ""
         decision = rec["action"]
+        decision_label = f'Suggest {rec["proposed"]}' if decision == "Review suggested rank" else SHORT_ACTION.get(decision, decision)
         rows.append(f'<tr><td class="pos">{number}.</td><td><a target="_self" href="?governor={int(rec["id"])}">{esc(rec["name"])}</a>{tag}</td>'
                     f'<td class="rank-pair">{esc(rec["held"] or "—")}<i>→</i>{esc(rec["proposed"] or "—")}</td>'
-                    f'<td><span class="chip {ACTION_STYLE[decision]}">{esc(SHORT_ACTION.get(decision, decision))}</span></td>'
+                    f'<td><span class="chip {ACTION_STYLE[decision]}">{esc(decision_label)}</span></td>'
                     f'<td class="score score-col">{rec["overall"]:.1f}</td><td class="reason reason-col">{esc(rec["reason"])}</td></tr>')
     html('<div class="council-wrap"><table class="council"><thead><tr><th class="pos">#</th><th>Governor</th>'
          '<th>Saved → suggested</th><th>Decision</th><th class="score-col">Overall</th><th class="reason-col">Reason</th>'
