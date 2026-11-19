@@ -277,6 +277,39 @@ def has_id_header(cells):
     return any(COLUMN_NAMES.get(normalized_heading(cell)) == "id" for cell in cells)
 
 
+def resolve_report_columns(frame, name):
+    supported = set(COLUMN_NAMES.values()) | set(WAR_METRICS)
+    headings = {normalized_heading(column) for column in frame}
+    resolved = pd.DataFrame(index=frame.index)
+    sources = {}
+    for column in frame:
+        heading = normalized_heading(column)
+        # Pandas appends .1, .2, etc. to repeated headings.
+        base = re.sub(r"\.\d+$", "", heading)
+        if base in headings:
+            heading = base
+        field = COLUMN_NAMES.get(heading, heading)
+        if field not in supported:
+            continue
+        values = frame[column]
+        if field not in resolved:
+            resolved[field] = values
+            sources[field] = [str(column)]
+            continue
+        left = resolved[field].astype("string").str.strip()
+        right = values.astype("string").str.strip()
+        blanks = ["", "-", "–", "—"]
+        left = left.mask(left.isin(blanks))
+        right = right.mask(right.isin(blanks))
+        conflicts = left.notna() & right.notna() & left.ne(right)
+        sources[field].append(str(column))
+        if conflicts.any():
+            labels = ", ".join(sources[field])
+            raise ValueError(f"{name} contains conflicting values for {field} in {labels}. Keep the intended column and upload again.")
+        resolved[field] = resolved[field].where(left.notna(), values)
+    return resolved
+
+
 def prepare_file(name, data):
     header_error = f"{name} needs a Governor ID or ID column. Include the column headings when pasting."
     if name.lower().endswith((".csv", ".tsv", ".txt")):
@@ -313,10 +346,7 @@ def prepare_file(name, data):
                     raise ValueError(header_error)
         except (BadZipFile, XLRDError, OSError) as exc:
             raise ValueError(f"Excel could not open {name}. Try the original workbook or export it as CSV.") from exc
-    df = df.dropna(how="all").copy()
-    df.columns = [COLUMN_NAMES.get(normalized_heading(col), normalized_heading(col)) for col in df.columns]
-    if df.columns.duplicated().any():
-        raise ValueError(f"{name} has two columns with the same meaning.")
+    df = resolve_report_columns(df.dropna(how="all"), name).dropna(how="all")
     # Copied table pages can repeat their headings between groups of governors.
     repeated_headings = df["id"].map(lambda value: COLUMN_NAMES.get(normalized_heading(value)) == "id")
     df = df.loc[~repeated_headings].drop_duplicates()
