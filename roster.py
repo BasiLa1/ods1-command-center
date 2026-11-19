@@ -27,11 +27,17 @@ RANKS = ("R5", "R4", "R3", "R2", "R1")
 ACTIONS = ("Keep current rank", "Promote", "Demote", "Monitor / warn", "Kick", "Review suggested rank")
 PHASES = {"Early KvK": (0.55, 0.45), "Mid KvK": (0.50, 0.50), "Late KvK": (0.30, 0.70)}
 DEFAULT_RULES = ("Early KvK", 45.0, 55.0)
+COMMAND_AS_OF = "2026-11-20"
 COMMAND = {
-    233428447: ("R5", "Leader"), 233185199: ("R5", "Counselor / R5"),
-    233184542: ("R4", "Warlord"), 233184517: ("R4", "Envoy"),
-    233190616: ("R4", "Officer"), 233196311: ("R4", "Officer"),
-    233183034: ("R4", "Officer"), 233183356: ("R4", "Officer"),
+    233428447: ("R5", "Leader"),
+    233183312: ("R4", "Officer"),
+    233183356: ("R4", "Officer"),
+    232674847: ("R4", "Officer"),
+    233184517: ("R4", "Warlord"),
+    233200204: ("R4", "Officer"),
+    233196311: ("R4", "Officer"),
+    233190616: ("R4", "Officer"),
+    233184542: ("R4", "Envoy"),
 }
 WEEK, LIFETIME, WAR = "Weekly ODS1 roster", "All-time ODS1 activity", "Kingdom 4161 KvK"
 BASE_LABEL = "Saved baseline"
@@ -102,7 +108,13 @@ def report_today():
 
 
 def saved_rank(rec):
-    return rank_code(rec.get("officer_rank")) or rank_code(rec.get("rank"))
+    rank = rank_code(rec.get("officer_rank")) or rank_code(rec.get("rank"))
+    if rec.get("in_active_126") and (rec.get("last_weekly_report") or "") >= COMMAND_AS_OF:
+        if rec["id"] in COMMAND:
+            return COMMAND[rec["id"]][0]
+        if rec.get("last_weekly_report") == COMMAND_AS_OF and rank in ("R4", "R5"):
+            return None
+    return rank
 
 
 def former_rank(rec):
