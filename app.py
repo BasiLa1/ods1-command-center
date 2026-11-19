@@ -354,7 +354,7 @@ def snapshot_rows(records, label):
 
 def rotations_page(scored):
     title("Rotations & history")
-    mode = st.radio("Show", ("Rotated out", "Departed", "Movement log", "Past reports", "Former names"), horizontal=True)
+    mode = st.radio("Show", ("Rotated out", "Departed", "Movement log", "Past reports", "Export archive", "Former names"), horizontal=True)
     query = st.text_input("Find a governor", placeholder="Name, alias or ID", key="rotation_search")
     members = [r for r in scored if matches(r, query)]
     if mode == "Past reports":
@@ -365,6 +365,29 @@ def rotations_page(scored):
         label = st.selectbox("Saved report", labels)
         st.caption("Read-only · Blank fields were absent from the saved report.")
         frame_table(snapshot_rows(members, label), "snapshot")
+    elif mode == "Export archive":
+        directory = st.session_state.data_directory
+        folders = [directory / "archive"]
+        if directory == db.DATA_DIR:
+            folders.insert(0, db.REPO_DATA_DIR / "archive")
+        paths = {path.name: path for folder in folders for path in folder.glob("*.csv")}
+        if not paths:
+            st.info("No historical exports in this data set.")
+            return
+        name = st.selectbox("Historical export", sorted(paths, reverse=True),
+                            format_func=lambda n: n[:-4].replace("_", " · "))
+        path = paths[name]
+        info = path.stat()
+        frame = overview_export(path, info.st_mtime_ns, info.st_size)
+        total = len(frame)
+        if st.checkbox("Current ODS1 members only", value=True):
+            frame = frame.loc[frame.index.isin(r["id"] for r in scored if r.get("in_active_126"))]
+        if query.strip():
+            names = frame["Player"] if "Player" in frame else frame["Governor Name"]
+            term = query.strip().casefold()
+            frame = frame.loc[[gid for gid, player in names.items() if term in f"{player} {gid}".casefold()]]
+        st.caption(f"{len(frame):,} of {total:,} governors · Dates and times identify individual exports.")
+        st.dataframe(frame.reset_index(), hide_index=True, height=520, use_container_width=True)
     elif mode == "Movement log":
         events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", []) if e.get("type") != "First seen"]
         frame_table([{"Report date": d, "Governor": name, "Movement": e.get("type"), "Previous rank": e.get("rank")}
