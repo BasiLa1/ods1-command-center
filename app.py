@@ -11,7 +11,7 @@ from filelock import Timeout
 import roster as db
 
 
-VIEWS = ("Roster review", "Activity", "KvK war", "Rotations", "Officer desk")
+VIEWS = ("Roster review", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
 PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4}
 ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick")))
 SHORT_ACTION = {"Keep current rank": "Keep", "Kick": "Kick review"}
@@ -30,7 +30,7 @@ h2,h3{letter-spacing:-.025em;color:var(--paper)}
 .overline,.stamp small,.stat-label,.subhead,.council thead th{font:700 .74rem/1.4 Inter,system-ui,sans-serif;letter-spacing:.095em;text-transform:uppercase}
 .overline{color:var(--gold);margin-bottom:3px}.mast h1{font:normal clamp(2.05rem,3.6vw,3.35rem)/1.06 Georgia,'Times New Roman',serif;letter-spacing:-.045em;color:var(--paper);margin:0;padding:0}
 .stamp{border-left:2px solid #b19457;padding-left:15px;display:grid;gap:3px}.stamp small{color:var(--muted)}.stamp strong{font-size:1rem;color:var(--paper)}.stamp span{font-size:.83rem;color:#c9b27e}
-.st-key-section{width:100%!important}.st-key-section [role="radiogroup"]{width:100%;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:.25rem;padding:.28rem;border:1px solid var(--line);border-radius:10px;background:#151b20;flex-wrap:nowrap}
+.st-key-section{width:100%!important}.st-key-section [role="radiogroup"]{width:100%;display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr));gap:.25rem;padding:.28rem;border:1px solid var(--line);border-radius:10px;background:#151b20;flex-wrap:nowrap}
 .st-key-section [role="radiogroup"]>div{min-width:0;display:flex}.st-key-section [data-testid="stRadioOption"]>div>div:first-child:not([data-testid="stMarkdownContainer"]){display:none}.st-key-section [role="radiogroup"] label{position:relative;display:flex!important;justify-content:center;align-items:center;flex:1 1 0;margin:0!important;min-height:50px;border-radius:6px;padding:.35rem .5rem!important;cursor:pointer;white-space:nowrap}
 .st-key-section [role="radiogroup"] label>div:first-child{position:absolute!important;opacity:0;width:1px;height:1px;overflow:hidden}
 .st-key-section [role="radiogroup"] label p{font-size:1rem;font-weight:650;margin:0;color:#c4cbcd}
@@ -61,7 +61,7 @@ h2,h3{letter-spacing:-.025em;color:var(--paper)}
 [data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden}
 @media(max-width:820px){.stat{padding:12px}.council .reason-col{display:none}.mast{padding-bottom:16px}.st-key-section [role="radiogroup"] label p{font-size:.9rem}}
 @media(max-width:600px){[data-testid="stMainBlockContainer"]{padding:3rem .85rem 2rem}.mast{align-items:flex-start;gap:8px}.identity{gap:9px}.sigil{width:35px;height:42px}.sigil span{width:32px;height:38px;font-size:17px}.overline{font-size:.64rem}.mast h1{font-size:1.9rem}.stamp{padding-left:8px}.stamp small,.stamp span{font-size:.64rem}.stamp strong{font-size:.78rem}
-.st-key-section [role="radiogroup"]{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px}.st-key-section [role="radiogroup"]>*{grid-column:span 2}.st-key-section [role="radiogroup"] label{min-height:40px;padding:.3rem .15rem!important}.st-key-section [role="radiogroup"]>:nth-last-child(-n+2){grid-column:span 3}
+.st-key-section [role="radiogroup"]{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px}.st-key-section [role="radiogroup"]>*{grid-column:span 2}.st-key-section [role="radiogroup"] label{min-height:40px;padding:.3rem .15rem!important}
 .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat-value{font-size:1.65rem}
 .council .score-col{display:none}.council td,.council th{padding:9px 5px!important}.council .pos{width:22px}.council{font-size:.85rem}.council .chip{font-size:.68rem;padding:1px 4px}.join-tag{display:table;margin:3px 0 0}.rank-pair i{margin:0 .08rem}.section-title h2{font-size:1.55rem}}
 </style>
@@ -172,29 +172,67 @@ def review_page(scored):
                        "ods1-roster-review.csv", "text/csv")
 
 
+ACTIVITY_FIELDS = {
+    "Forts": ("forts_7d", "forts_all"),
+    "Helps": ("helps_7d", "helps_all"),
+    "Tech donations": ("tech_7d", "tech_all"),
+    "Flag hours": ("build_7d", "build_all"),
+    "Activity Points": ("rok_act_7d", None),
+    "Usefulness": ("rok_use_7d", "rok_use_all"),
+    "RSS assistance": ("rss_7d", "rss_all"),
+}
+
+
+def activity_members(records, key):
+    period = st.radio("Period", ("Weekly", "All-time"), horizontal=True, key=f"{key}_period")
+    if period == "All-time":
+        return 1, [(display_name(record), record["id"], record) for record in records]
+    weeks = db.history_labels(records)
+    if not weeks:
+        st.info("Import a weekly RokStats report to see that week's activity.")
+        return 0, []
+    week = st.selectbox("Weekly report ending", weeks, key=f"{key}_week")
+    return 0, [
+        (entry.get("name") or f"Governor {record['id']}", record["id"], entry)
+        for record in records
+        for entry in record.get("history", [])
+        if entry.get("date") == week and entry.get("in_active")
+    ]
+
+
+def activity_value(entry, field):
+    value = entry.get(field)
+    if field.startswith("build_") and value is not None:
+        return round(db.n(value) / 3600, 1)
+    return value
+
+
 def activity_page(scored):
     title("Alliance activity")
-    a, b = st.columns([1.5, 1])
-    period = a.radio("Period", ("Weekly", "All-time", "Top 25"), horizontal=True, key="activity_period")
-    query = b.text_input("Find a governor", placeholder="Name, alias or ID", key="activity_search")
-    members = [r for r in scored if matches(r, query) and (period == "All-time" or r["in_active_126"])]
-    if period == "All-time":
-        rows = sorted(members, key=lambda r: (-db.n(r.get("rok_use_all")), r["id"]))
-        frame_table([{"Governor": display_name(r), "Roster status": r.get("status"), "Usefulness": r.get("rok_use_all"),
-                      "Forts": r.get("forts_all"), "Tech points": r.get("tech_all"), "Flag hours": round(db.n(r.get("build_all")) / 3600, 1),
-                      "Helps": r.get("helps_all"), "RSS assistance": r.get("rss_all")} for r in rows], "lifetime")
-    elif period == "Top 25":
-        metric = st.radio("Leaderboard", ("Forts", "Tech points", "Flag hours"), horizontal=True)
-        field = {"Forts": "forts_7d", "Tech points": "tech_7d", "Flag hours": "build_7d"}[metric]
-        rows = sorted(members, key=lambda r: (-db.n(r.get(field)), r["id"]))[:25]
-        frame_table([{"Governor": display_name(r), metric: round(db.n(r.get(field)) / 3600, 1) if metric == "Flag hours" else r.get(field),
-                      "Support score": r["support"]} for r in rows], "top25")
-    else:
-        rows = sorted(members, key=lambda r: (-r["support"], r["id"]))
-        frame_table([{"Governor": display_name(r), "Support / 100": r["support"], "Activity Points": r.get("rok_act_7d"),
-                      "RokStats usefulness": r.get("rok_use_7d"), "Forts": r.get("forts_7d"), "Tech points": r.get("tech_7d"),
-                      "Flag hours": round(db.n(r.get("build_7d")) / 3600, 1), "Helps": r.get("helps_7d"),
-                      "RSS assistance": r.get("rss_7d")} for r in rows], "weekly")
+    period, members = activity_members(scored, "activity")
+    query = st.text_input("Find a governor", placeholder="Name or Governor ID", key="activity_search")
+    fields = {label: columns[period] for label, columns in ACTIVITY_FIELDS.items() if columns[period]}
+    frame_table([
+        {"Governor": name, "Governor ID": gid,
+         **{label: activity_value(entry, field) for label, field in fields.items()}}
+        for name, gid, entry in members if query.strip().casefold() in f"{name} {gid}".casefold()
+    ], "activity_table", empty="No activity rows in this report.")
+
+
+def leaderboards_page(scored):
+    title("Leaderboards")
+    period, members = activity_members(scored, "leaderboards")
+    metrics = [name for name, fields in ACTIVITY_FIELDS.items() if fields[period]]
+    metric = st.selectbox("Stat", metrics, key="leaderboard_stat")
+    field = ACTIVITY_FIELDS[metric][period]
+    ranked = sorted(
+        ((name, gid, entry) for name, gid, entry in members if entry.get(field) is not None),
+        key=lambda member: (-db.n(member[2][field]), member[1]),
+    )
+    frame_table([
+        {"Place": place, "Governor": name, "Governor ID": gid, metric: activity_value(entry, field)}
+        for place, (name, gid, entry) in enumerate(ranked[:25], start=1)
+    ], "leaderboard", empty=f"This report has no values for {metric}.")
 
 
 def war_page(scored):
@@ -291,7 +329,8 @@ def member_detail(scored, preferred=None):
         submitted = st.form_submit_button("Save officer decision", type="primary")
     if submitted:
         try:
-            db.change_records(lambda records: db.save_officer(records, gid, override, note, excused, expected))
+            db.change_records(lambda records: db.save_officer(records, gid, override, note, excused, expected),
+                              directory=st.session_state.data_directory)
             st.session_state.pop(expected_key, None)
             st.session_state.notice = f'Saved the officer decision for {rec["name"]}.'
             st.rerun()
@@ -314,7 +353,8 @@ def member_detail(scored, preferred=None):
 def commit_import(batches, full, restore, auto):
     try:
         result = db.change_records(lambda records: db.merge_dated_reports(
-            records, batches, full, st.session_state.rules, restore, auto))
+            records, batches, full, st.session_state.rules, restore, auto),
+            directory=st.session_state.data_directory)
     except db.OlderReports as exc:
         st.session_state.import_info = str(exc)
     except (ValueError, OSError, Timeout) as exc:
@@ -330,6 +370,8 @@ def report_import(scored):
         st.error(message)
     if message := st.session_state.pop("import_info", None):
         st.info(message)
+    if st.session_state.data_directory == db.CLEAN_DATA_DIR:
+        st.caption("Import the older week first. Check that each weekly report shows the date the week ended.")
     uploads = st.file_uploader("Drop your RokStats exports", type=["xlsx", "xls", "csv", "tsv", "txt"],
                                accept_multiple_files=True, key=f"rok_upload_{generation}",
                                help="Excel, CSV or a tab-separated table. You can drop several reports together.")
@@ -339,7 +381,7 @@ def report_import(scored):
                               placeholder="Paste here, then press Ctrl+Enter to preview.")
     if pasted.strip():
         files.append(("Pasted table.tsv", pasted.encode("utf-8")))
-    paths = db.repository_reports()
+    paths = db.repository_reports(st.session_state.data_directory)
     if paths:
         with st.expander("Use files already in data/"):
             chosen = st.multiselect("Available exports", paths, format_func=lambda path: path.name,
@@ -431,6 +473,18 @@ def briefing(scored, phase):
     return "\n".join(parts).strip()
 
 
+def start_clean_reports():
+    try:
+        # Creating a separate roster leaves the previous reports available in the dashboard.
+        db.change_records(lambda records: None, directory=db.CLEAN_DATA_DIR)
+    except (OSError, ValueError, Timeout) as exc:
+        st.session_state.import_error = str(exc)
+    else:
+        st.session_state.report_dataset = "Clean reports"
+        st.session_state.import_generation = st.session_state.get("import_generation", 0) + 1
+        st.session_state.notice = "Clean reports are ready. Upload last week's report first."
+
+
 def officer_page(scored, records, preferred):
     title("Officer desk")
     mode = st.radio("Tools", ("Governor profile", "Import reports", "Leadership briefing"), horizontal=True, key="officer_mode")
@@ -438,6 +492,10 @@ def officer_page(scored, records, preferred):
         member_detail(scored, preferred)
     elif mode == "Import reports":
         report_import(scored)
+        if not (db.CLEAN_DATA_DIR / db.BASELINE).exists():
+            with st.expander("Start fresh"):
+                st.caption("Open an empty roster for new imports. You can reopen the previous roster from Review settings.")
+                st.button("Start clean reports", on_click=start_clean_reports)
         with st.expander("Download current roster backup"):
             st.caption("This file includes officer notes and saved ranks. Keep a private copy after each review.")
             st.download_button("Download ods1_baseline.json", json.dumps(records, ensure_ascii=False, indent=2).encode(),
@@ -451,8 +509,14 @@ def officer_page(scored, records, preferred):
 def main():
     st.set_page_config(page_title="ODS1 · Alliance command", page_icon="♜", layout="wide", initial_sidebar_state="collapsed")
     html(CSS)
+    clean_exists = (db.CLEAN_DATA_DIR / db.BASELINE).exists()
+    dataset = "Previous roster"
+    if clean_exists:
+        dataset = st.sidebar.radio("Data set", ("Clean reports", "Previous roster"), key="report_dataset")
+    directory = db.CLEAN_DATA_DIR if dataset == "Clean reports" else db.DATA_DIR
+    st.session_state.data_directory = directory
     try:
-        records, pending = db.load_live()
+        records, pending = db.load_live(directory)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         st.error(f"Could not load the ODS1 roster. {exc}")
         st.stop()
@@ -469,7 +533,7 @@ def main():
     st.session_state.rules = rules
     scored = [{**r, **db.classify(r, rules), "held": db.saved_rank(r)} for r in records]
     latest = db.latest_week(records)
-    label = (db.iso_day(latest).strftime("%d %b %Y") if latest and db.iso_day(latest) else "Saved baseline")
+    label = (db.iso_day(latest).strftime("%d %b %Y") if latest and db.iso_day(latest) else ("No weekly reports" if clean_exists and dataset == "Clean reports" else "Saved baseline"))
     html('<div class="mast"><div class="identity"><div class="sigil" aria-hidden="true"><span>O1</span></div><div>'
          '<div class="overline">Odyssey 1 &nbsp; / &nbsp; Kingdom 4161</div><h1>Alliance command</h1></div></div>'
          f'<div class="stamp"><small>Roster source</small><strong>{esc(label)}</strong><span>{esc(phase)} · KvK 1</span></div></div>')
@@ -491,6 +555,8 @@ def main():
         review_page(scored)
     elif view == "Activity":
         activity_page(scored)
+    elif view == "Leaderboards":
+        leaderboards_page(scored)
     elif view == "KvK war":
         war_page(scored)
     elif view == "Rotations":

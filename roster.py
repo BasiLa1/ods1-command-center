@@ -21,6 +21,7 @@ from xlrd.biffh import XLRDError
 REPO_DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR = Path(os.environ.get("ODS1_DATA_DIR") or REPO_DATA_DIR).expanduser()
 BASELINE = "ods1_baseline.json"
+CLEAN_DATA_DIR = DATA_DIR / "clean-reports"
 LEGACY_STATE = "ods1_persistent_state.json"
 RANKS = ("R5", "R4", "R3", "R2", "R1")
 ACTIONS = ("Keep current rank", "Promote", "Demote", "Monitor / warn", "Kick")
@@ -200,6 +201,7 @@ def snapshot(rec, rules, day):
         "ods1_usefulness": result["support"], "kvk_score": result["war"], "target": result["proposed"],
         "action": result["action"], "power": rec.get("power"), "forts_7d": rec.get("forts_7d"),
         "tech_7d": rec.get("tech_7d"), "build_7d": rec.get("build_7d"), "helps_7d": rec.get("helps_7d"),
+        "rss_7d": rec.get("rss_7d"), "rok_act_7d": rec.get("rok_act_7d"), "rok_use_7d": rec.get("rok_use_7d"),
         "kvk_dkp": rec.get("kvk_dkp"), "phase": rules[0],
     }
 
@@ -477,7 +479,10 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
         available.update(rec.get("source_fingerprints") or {})
     report_digests = {kind: hashlib.sha256(repr((report_day, digest, complete if kind == WEEK else None)).encode()).hexdigest()
                       for kind, digest, _ in reports}
-    changed = [item for item in reports if available.get(item[0]) != report_digests[item[0]]]
+    changed = sorted(
+        (item for item in reports if available.get(item[0]) != report_digests[item[0]]),
+        key=lambda item: REPORT_TYPES.index(item[0]),
+    )
     if not changed:
         return ALREADY_IMPORTED
     was_active = {r["id"] for r in records if r.get("in_active_126")}
@@ -530,6 +535,9 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
             rec = by_id[gid]
             touched.add(gid)
             apply_identity(rec, row)
+            if kind == WEEK:
+                for field in WEEK_METRICS.values():
+                    rec.pop(field, None)
             if row.get("power") is not None and (kind == WEEK or not rec.get("in_active_126")):
                 rec["power"] = row["power"]
             for source, dest in metrics.items():
@@ -562,10 +570,6 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                 joined_on = iso_day(row.get("joined"))
                 if joined_on and joined_on <= day:
                     rec["joined_date"] = joined_on.isoformat()
-                for metric in ("forts", "tech", "build", "helps", "rss"):
-                    if row.get(metric) is not None:
-                        field = ALL_METRICS[metric]
-                        rec[field] = max(n(rec.get(field)), row[metric])
             if row.get("last login"):
                 rec["last_login"] = str(row["last login"])
 
