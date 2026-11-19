@@ -358,7 +358,7 @@ def report_import(scored):
     batches = {}
     seen = {}
     weekly_ids = []
-    today = db.utc_day()
+    today = db.report_today()
     for idx, (name, data) in enumerate(files):
         try:
             frame = db.prepare_file(name, data)
@@ -373,7 +373,7 @@ def report_import(scored):
                     st.text(name)
                 left, right = st.columns(2)
                 kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}")
-                day = right.date_input("Report end date (UTC)", value=detected_day or today, key=f"date_{key}") or detected_day or today
+                day = right.date_input("Report end date", value=detected_day or today, key=f"date_{key}") or detected_day or today
             if day > today:
                 raise ValueError(f"{name} is dated {day}, which is in the future. Check the date in Import options.")
             rows = db.report_data(name, frame, kind)

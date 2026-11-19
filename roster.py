@@ -10,6 +10,7 @@ import os
 import re
 import tempfile
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -93,6 +94,10 @@ def iso_day(value):
 
 def utc_day():
     return datetime.now(timezone.utc).date()
+
+
+def report_today():
+    return datetime.now(ZoneInfo("Asia/Tbilisi")).date()
 
 
 def saved_rank(rec):
@@ -456,8 +461,8 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
     """Apply validated files as a batch. The caller owns the transaction."""
     by_id = {r["id"]: r for r in records}
     day = date.fromisoformat(report_day)
-    if day > utc_day():
-        raise ValueError("Choose a report date on or before today (UTC).")
+    if day > report_today():
+        raise ValueError("Choose a report date on or before today (Georgia time).")
     if len({kind for kind, _, _ in reports}) != len(reports):
         raise ValueError("Choose one file per report type in each import.")
     if not reports:
