@@ -223,16 +223,19 @@ def overview_export(path, modified, size):
 
 
 def overview_page(scored):
-    title("Governor overview")
-    scope, search, period = st.columns(3)
-    population = scope.selectbox("Players", ["All ODS1 governors", "Active roster", "Kingdom KvK"])
+    title("Active roster overview")
+    active = {r["id"]: r for r in scored if r.get("in_active_126")}
+    if not active:
+        st.info("No current members in this roster.")
+        return
+    search, period = st.columns(2)
     query = search.text_input("Find a player", placeholder="Name or Governor ID").strip().casefold()
     weeks = db.history_labels(scored)
     week = period.selectbox("Weekly report ending", weeks or ["No weekly reports"])
     rows = []
-    for r in scored:
+    for r in active.values():
         snapshot = next((h for h in r.get("history", []) if h.get("date") == week and h.get("in_active")), {})
-        row = {"Governor ID": r["id"], "Governor": r["name"], "Active now": bool(r["in_active_126"]),
+        row = {"Governor ID": r["id"], "Governor": r["name"],
                "Saved rank": r["held"], "Suggested rank": r["proposed"], "Decision": r["action"],
                "Power": r.get("power"), "Overall": r["overall"], "Support": r["support"], "KvK score": r["war"],
                "Officer note": r.get("officer_note"), "Excused": bool(r.get("is_excused"))}
@@ -242,8 +245,7 @@ def overview_page(scored):
         row.update({f"KvK · {metric.upper() if metric in ('kp', 'dkp') else metric.title()}": r.get(field)
                     for metric, field in db.WAR_METRICS.items()})
         rows.append(row)
-    frame = pd.DataFrame(rows).set_index("Governor ID") if rows else pd.DataFrame()
-    kingdom = pd.DataFrame()
+    frame = pd.DataFrame(rows).set_index("Governor ID")
     # Include export-only fields such as gifts, goals and individual troop tiers.
     sources = {}
     for path in db.repository_reports(st.session_state.data_directory):
@@ -268,8 +270,6 @@ def overview_page(scored):
         raw = overview_export(path, info.st_mtime_ns, info.st_size)
         if raw.empty:
             continue
-        if group == "KvK":
-            kingdom = raw
         extras = raw.drop(columns=["Player", "Governor Name"], errors="ignore")
         for column in extras:
             heading = db.normalized_heading(column)
@@ -280,32 +280,20 @@ def overview_page(scored):
             label = f"{group} · {column}"
             if label not in frame:
                 frame[label] = extras[column].reindex(frame.index)
-    if population == "Kingdom KvK" and not kingdom.empty:
-        frame = kingdom.rename(columns={"Governor Name": "Governor"})
-    elif not frame.empty:
-        if population == "Active roster":
-            frame = frame[frame["Active now"]]
-        elif population == "Kingdom KvK":
-            frame = frame.loc[[r["id"] for r in scored if r.get("in_kvk_4161")]]
-        else:
-            frame = frame.sort_values(["Active now", "Governor"], ascending=[False, True])
+    frame = frame.sort_values("Governor")
     if query and not frame.empty:
         frame = frame.loc[[gid for gid, name in frame["Governor"].items() if query in f"{name} {gid}".casefold()]]
     if frame.empty:
         st.info("No governors match this view.")
         return
-    st.caption(f"{len(frame):,} players · Scroll sideways for more stats. Select an ODS1 player to edit their rank, note or excused status.")
+    st.caption(f"{len(frame):,} current members · Scroll sideways for more stats. Select an ODS1 player to edit their rank, note or excused status.")
     visible = frame.reset_index()
-    table_key = hashlib.sha256(repr((str(st.session_state.data_directory), population, week, tuple(frame.index))).encode()).hexdigest()[:16]
+    table_key = hashlib.sha256(repr((str(st.session_state.data_directory), week, tuple(frame.index))).encode()).hexdigest()[:16]
     event = st.dataframe(visible, key=f"overview_{table_key}", height=540, hide_index=True,
                          use_container_width=True, on_select="rerun", selection_mode="single-row")
     if event.selection.rows and event.selection.rows[0] < len(visible):
         gid = int(visible.iloc[event.selection.rows[0]]["Governor ID"])
-        rec = next((r for r in scored if r["id"] == gid), None)
-        if rec:
-            member_detail([rec], gid, selected=rec)
-        else:
-            st.info("This governor appears only in the kingdom export. Officer edits are available for ODS1 governors.")
+        member_detail([active[gid]], gid, selected=active[gid])
 
 
 def activity_page(scored):
