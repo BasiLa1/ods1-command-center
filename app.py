@@ -11,7 +11,7 @@ from filelock import Timeout
 import roster as db
 
 
-VIEWS = ("Roster review", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
+VIEWS = ("Roster review", "Overview", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
 PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4, "Review suggested rank": 2}
 ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick", "promote")))
 SHORT_ACTION = {"Keep current rank": "Keep", "Kick": "Kick review"}
@@ -30,7 +30,7 @@ h2,h3{letter-spacing:-.025em;color:var(--paper)}
 .overline,.stamp small,.stat-label,.subhead,.council thead th{font:700 .74rem/1.4 Inter,system-ui,sans-serif;letter-spacing:.095em;text-transform:uppercase}
 .overline{color:var(--gold);margin-bottom:3px}.mast h1{font:normal clamp(2.05rem,3.6vw,3.35rem)/1.06 Georgia,'Times New Roman',serif;letter-spacing:-.045em;color:var(--paper);margin:0;padding:0}
 .stamp{border-left:2px solid #b19457;padding-left:15px;display:grid;gap:3px}.stamp small{color:var(--muted)}.stamp strong{font-size:1rem;color:var(--paper)}.stamp span{font-size:.83rem;color:#c9b27e}
-.st-key-section{width:100%!important}.st-key-section [role="radiogroup"]{width:100%;display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr));gap:.25rem;padding:.28rem;border:1px solid var(--line);border-radius:10px;background:#151b20;flex-wrap:nowrap}
+.st-key-section{width:100%!important}.st-key-section [role="radiogroup"]{width:100%;display:grid!important;grid-template-columns:repeat(7,minmax(0,1fr));gap:.25rem;padding:.28rem;border:1px solid var(--line);border-radius:10px;background:#151b20;flex-wrap:nowrap}
 .st-key-section [role="radiogroup"]>div{min-width:0;display:flex}.st-key-section [data-testid="stRadioOption"]>div>div:first-child:not([data-testid="stMarkdownContainer"]){display:none}.st-key-section [role="radiogroup"] label{position:relative;display:flex!important;justify-content:center;align-items:center;flex:1 1 0;margin:0!important;min-height:50px;border-radius:6px;padding:.35rem .5rem!important;cursor:pointer;white-space:nowrap}
 .st-key-section [role="radiogroup"] label>div:first-child{position:absolute!important;opacity:0;width:1px;height:1px;overflow:hidden}
 .st-key-section [role="radiogroup"] label p{font-size:1rem;font-weight:650;margin:0;color:#c4cbcd}
@@ -209,6 +209,105 @@ def activity_value(entry, field):
     return value
 
 
+@st.cache_data(show_spinner=False)
+def overview_export(path, modified, size):
+    frame = pd.read_csv(path)
+    id_column = next((c for c in ("Governor ID", "ID") if c in frame), None)
+    if id_column is None:
+        return pd.DataFrame()
+    ids = pd.to_numeric(frame.pop(id_column), errors="coerce")
+    frame.index = ids.rename("Governor ID")
+    if ids.isna().any() or not ids.is_unique:
+        return pd.DataFrame()
+    return frame
+
+
+def overview_page(scored):
+    title("Governor overview")
+    scope, search, period = st.columns(3)
+    population = scope.selectbox("Players", ["All ODS1 governors", "Active roster", "Kingdom KvK"])
+    query = search.text_input("Find a player", placeholder="Name or Governor ID").strip().casefold()
+    weeks = db.history_labels(scored)
+    week = period.selectbox("Weekly report ending", weeks or ["No weekly reports"])
+    rows = []
+    for r in scored:
+        snapshot = next((h for h in r.get("history", []) if h.get("date") == week and h.get("in_active")), {})
+        row = {"Governor ID": r["id"], "Governor": r["name"], "Active now": bool(r["in_active_126"]),
+               "Saved rank": r["held"], "Suggested rank": r["proposed"], "Decision": r["action"],
+               "Power": r.get("power"), "Overall": r["overall"], "Support": r["support"], "KvK score": r["war"],
+               "Officer note": r.get("officer_note"), "Excused": bool(r.get("is_excused"))}
+        for metric, (weekly, lifetime) in ACTIVITY_FIELDS.items():
+            row[f"Weekly · {metric}"] = activity_value(snapshot, weekly)
+            row[f"All-time · {metric}"] = activity_value(r, lifetime)
+        row.update({f"KvK · {metric.upper() if metric in ('kp', 'dkp') else metric.title()}": r.get(field)
+                    for metric, field in db.WAR_METRICS.items()})
+        rows.append(row)
+    frame = pd.DataFrame(rows).set_index("Governor ID") if rows else pd.DataFrame()
+    kingdom = pd.DataFrame()
+    # Include export-only fields such as gifts, goals and individual troop tiers.
+    sources = {}
+    for path in db.repository_reports(st.session_state.data_directory):
+        if path.suffix.lower() != ".csv":
+            continue
+        name = path.name.casefold()
+        day = db.report_date_in_name(name)
+        if not day:
+            continue
+        if "weekly" in name and day.isoformat() == week:
+            group = "Weekly"
+        elif "all-time" in name:
+            group = "All-time"
+        elif "kvk" in name:
+            group = "KvK"
+        else:
+            continue
+        if group not in sources or day > sources[group][0]:
+            sources[group] = day, path
+    for group, (day, path) in sources.items():
+        info = path.stat()
+        raw = overview_export(path, info.st_mtime_ns, info.st_size)
+        if raw.empty:
+            continue
+        if group == "KvK":
+            kingdom = raw
+        extras = raw.drop(columns=["Player", "Governor Name"], errors="ignore")
+        for column in extras:
+            heading = db.normalized_heading(column)
+            field = db.COLUMN_NAMES.get(heading, heading)
+            represented = db.WAR_METRICS if group == "KvK" else db.WEEK_METRICS
+            if field in represented:
+                continue
+            label = f"{group} · {column}"
+            if label not in frame:
+                frame[label] = extras[column].reindex(frame.index)
+    if population == "Kingdom KvK" and not kingdom.empty:
+        frame = kingdom.rename(columns={"Governor Name": "Governor"})
+    elif not frame.empty:
+        if population == "Active roster":
+            frame = frame[frame["Active now"]]
+        elif population == "Kingdom KvK":
+            frame = frame.loc[[r["id"] for r in scored if r.get("in_kvk_4161")]]
+        else:
+            frame = frame.sort_values(["Active now", "Governor"], ascending=[False, True])
+    if query and not frame.empty:
+        frame = frame.loc[[gid for gid, name in frame["Governor"].items() if query in f"{name} {gid}".casefold()]]
+    if frame.empty:
+        st.info("No governors match this view.")
+        return
+    st.caption(f"{len(frame):,} players · Scroll sideways for more stats. Select an ODS1 player to edit their rank, note or excused status.")
+    visible = frame.reset_index()
+    table_key = hashlib.sha256(repr((str(st.session_state.data_directory), population, week, tuple(frame.index))).encode()).hexdigest()[:16]
+    event = st.dataframe(visible, key=f"overview_{table_key}", height=540, hide_index=True,
+                         use_container_width=True, on_select="rerun", selection_mode="single-row")
+    if event.selection.rows and event.selection.rows[0] < len(visible):
+        gid = int(visible.iloc[event.selection.rows[0]]["Governor ID"])
+        rec = next((r for r in scored if r["id"] == gid), None)
+        if rec:
+            member_detail([rec], gid, selected=rec)
+        else:
+            st.info("This governor appears only in the kingdom export. Officer edits are available for ODS1 governors.")
+
+
 def activity_page(scored):
     title("Alliance activity")
     period, members = activity_members(scored, "activity")
@@ -301,13 +400,13 @@ def rotations_page(scored):
                       "DKP": r.get("kvk_dkp"), "All-time forts": r.get("forts_all")} for r in rows], "memberships")
 
 
-def member_detail(scored, preferred=None):
+def member_detail(scored, preferred=None, selected=None):
     members = {r["id"]: r for r in sorted(scored, key=lambda r: r["name"].casefold())}
     ids = list(members)
     if not ids:
         st.info("Import a roster to review a governor.")
         return
-    gid = st.selectbox("Governor", ids, index=ids.index(preferred) if preferred in ids else 0,
+    gid = selected["id"] if selected else st.selectbox("Governor", ids, index=ids.index(preferred) if preferred in ids else 0,
                        format_func=lambda key: f'{members[key]["name"]} · {key}', key="officer_governor")
     rec = members[gid]
     tag = db.badge(rec, db.utc_day())
@@ -561,6 +660,8 @@ def main():
     view = st.radio("Command navigation", VIEWS, horizontal=True, label_visibility="collapsed", key="section")
     if view == "Roster review":
         review_page(scored)
+    elif view == "Overview":
+        overview_page(scored)
     elif view == "Activity":
         activity_page(scored)
     elif view == "Leaderboards":
