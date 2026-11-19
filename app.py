@@ -1,1276 +1,503 @@
-import glob
+"""ODS1 Command Center. Start with streamlit run app.py from the repository."""
+import hashlib
 import json
-import os
-from datetime import datetime, timezone
-import numpy as np
+import re
+from html import escape
+
 import pandas as pd
 import streamlit as st
+from filelock import Timeout
 
-st.set_page_config(
-    page_title="ODS1 Command Center | KD 4161",
-    page_icon="⚔️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+import roster as db
 
-st.markdown("""
+
+VIEWS = ("Roster review", "Activity", "KvK war", "Rotations", "Officer desk")
+PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4}
+ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick")))
+SHORT_ACTION = {"Keep current rank": "Keep", "Kick": "Kick review"}
+CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    .stApp {
-        background-color: #070b14;
-        color: #f8fafc;
-    }
-    .main .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-        max-width: 1460px;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #0b1120;
-        border-right: 1px solid #1e293b;
-    }
-
-    /* Sidebar Rules Card */
-    .rules-card {
-        background: #111827;
-        border: 1px solid #1e293b;
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-top: 6px;
-        margin-bottom: 10px;
-        font-size: 0.8rem;
-        line-height: 1.55;
-        color: #cbd5e1;
-    }
-    .rules-card b {
-        color: #fbbf24;
-    }
-
-    /* Hero Banner */
-    .hero-banner {
-        background: radial-gradient(circle at top right, rgba(245, 158, 11, 0.14), transparent 45%),
-                    linear-gradient(135deg, #0f172a 0%, #111827 100%);
-        border: 1px solid #1e293b;
-        border-left: 5px solid #f59e0b;
-        border-radius: 16px;
-        padding: 20px 24px;
-        margin-bottom: 20px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 14px;
-        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
-    }
-    .hero-title {
-        font-size: 1.55rem;
-        font-weight: 800;
-        color: #ffffff;
-        margin: 0;
-        letter-spacing: -0.02em;
-    }
-    .hero-sub {
-        font-size: 0.86rem;
-        color: #94a3b8;
-        margin-top: 4px;
-    }
-    .hero-badges {
-        display: flex;
-        gap: 10px;
-        align-items: center;
-        flex-wrap: wrap;
-    }
-    .pill-gold {
-        background: rgba(245, 158, 11, 0.14);
-        border: 1px solid rgba(245, 158, 11, 0.4);
-        color: #fbbf24;
-        padding: 6px 14px;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 700;
-    }
-    .pill-blue {
-        background: rgba(56, 189, 248, 0.12);
-        border: 1px solid rgba(56, 189, 248, 0.35);
-        color: #38bdf8;
-        padding: 6px 14px;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 600;
-    }
-
-    /* KPI Strip */
-    .kpi-row {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 14px;
-        margin-bottom: 22px;
-    }
-    @media (max-width: 1100px) {
-        .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    .kpi-box {
-        background: #0f172a;
-        border: 1px solid #1e293b;
-        border-radius: 14px;
-        padding: 15px 18px;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-    }
-    .kpi-box.accent-blue { border-top: 3px solid #38bdf8; }
-    .kpi-box.accent-green { border-top: 3px solid #10b981; }
-    .kpi-box.accent-amber { border-top: 3px solid #f59e0b; }
-    .kpi-box.accent-red { border-top: 3px solid #ef4444; }
-    .kpi-box.accent-purple { border-top: 3px solid #a855f7; }
-
-    .kpi-head {
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.07em;
-        color: #94a3b8;
-    }
-    .kpi-num {
-        font-size: 1.6rem;
-        font-weight: 800;
-        color: #f8fafc;
-        margin-top: 5px;
-        line-height: 1.1;
-    }
-    .kpi-foot {
-        font-size: 0.75rem;
-        color: #64748b;
-        margin-top: 5px;
-    }
-
-    /* Section Headers & Cards */
-    .bucket-banner {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 11px 16px;
-        border-radius: 10px;
-        margin-top: 16px;
-        margin-bottom: 8px;
-        font-weight: 700;
-        font-size: 0.94rem;
-    }
-    .bucket-r5 { background: rgba(168, 85, 247, 0.14); border-left: 4px solid #a855f7; color: #e9d5ff; }
-    .bucket-r3 { background: rgba(16, 185, 129, 0.14); border-left: 4px solid #10b981; color: #a7f3d0; }
-    .bucket-r2 { background: rgba(59, 130, 246, 0.14); border-left: 4px solid #3b82f6; color: #bfdbfe; }
-    .bucket-r1 { background: rgba(245, 158, 11, 0.14); border-left: 4px solid #f59e0b; color: #fde68a; }
-    .bucket-kick { background: rgba(239, 68, 68, 0.14); border-left: 4px solid #ef4444; color: #fecaca; }
-
-    /* Podium Cards */
-    .podium-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 14px;
-    }
-    .podium-card {
-        background: linear-gradient(145deg, #111827, #1e293b);
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 12px 14px;
-    }
-    .podium-rank {
-        font-size: 0.72rem;
-        font-weight: 800;
-        text-transform: uppercase;
-        color: #fbbf24;
-        letter-spacing: 0.05em;
-    }
-    .podium-name {
-        font-size: 1.0rem;
-        font-weight: 700;
-        color: #ffffff;
-        margin-top: 2px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .podium-stat {
-        font-size: 0.83rem;
-        color: #38bdf8;
-        font-weight: 600;
-        margin-top: 3px;
-    }
-
-    /* High-Impact 5-Tab Navigation Bar */
-    .stTabs [data-baseweb="tab-list"] {
-        display: flex;
-        gap: 10px;
-        background: linear-gradient(180deg, #0f172a 0%, #090d16 100%);
-        padding: 10px;
-        border-radius: 16px;
-        border: 1px solid #334155;
-        margin-top: 6px;
-        margin-bottom: 24px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.65);
-    }
-    .stTabs [data-baseweb="tab-highlight"],
-    .stTabs [data-baseweb="tab-border"] {
-        display: none !important;
-        background-color: transparent !important;
-        height: 0px !important;
-    }
-    .stTabs [data-baseweb="tab"] {
-        flex: 1 1 0px;
-        justify-content: center;
-        height: 50px !important;
-        border-radius: 12px !important;
-        padding: 0 18px !important;
-        color: #cbd5e1 !important;
-        background-color: #131c31 !important;
-        border: 1px solid #263554 !important;
-        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-        white-space: nowrap;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-    }
-    .stTabs [data-baseweb="tab"] p,
-    .stTabs [data-baseweb="tab"] div,
-    .stTabs [data-baseweb="tab"] span {
-        font-size: 0.96rem !important;
-        font-weight: 700 !important;
-        letter-spacing: 0.02em !important;
-        color: inherit !important;
-        margin: 0 !important;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #ffffff !important;
-        background-color: #1e293b !important;
-        border-color: #fbbf24 !important;
-        transform: translateY(-2px);
-    }
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
-        color: #070b14 !important;
-        border: 1px solid #fde68a !important;
-        transform: translateY(-2px);
-        box-shadow: 0 0 20px rgba(245, 158, 11, 0.45), 0 6px 14px rgba(0, 0, 0, 0.5) !important;
-    }
-    .stTabs [aria-selected="true"] p,
-    .stTabs [aria-selected="true"] div,
-    .stTabs [aria-selected="true"] span {
-        color: #070b14 !important;
-        font-weight: 800 !important;
-    }
-
-    [data-testid="stDataFrame"] {
-        border: 1px solid #1e293b;
-        border-radius: 12px;
-        overflow: hidden;
-    }
+:root{--ink:#10151a;--panel:#192026;--line:#333b40;--paper:#f2f0e9;--muted:#a8b1b4;--gold:#e5bd68}
+[data-testid="stAppViewContainer"],.stApp{background:var(--ink);color:var(--paper)}
+[data-testid="stSidebar"]{background:#171d22;border-right:1px solid var(--line)}
+[data-testid="stHeader"]{background:var(--ink)}
+[data-testid="stMainBlockContainer"],.main .block-container{max-width:1480px;padding-top:3.5rem;padding-bottom:3rem}
+[data-testid="stVerticalBlock"]{gap:.85rem}
+h2,h3{letter-spacing:-.025em;color:var(--paper)}
+.mast{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:8px 0 24px;border-bottom:1px solid #4b4436;margin-bottom:2px}
+.identity{display:flex;align-items:center;gap:17px}.sigil{width:54px;height:64px;flex-shrink:0;background:#c9a553;clip-path:polygon(0 0,100% 0,100% 73%,50% 100%,0 73%);display:grid;place-items:center}
+.sigil span{display:grid;place-items:center;width:50px;height:60px;background:#1b2022;clip-path:inherit;font:700 24px Georgia,serif;letter-spacing:-.075em;color:#f1d48f;padding-bottom:5px}
+.overline,.stamp small,.stat-label,.subhead,.council thead th{font:700 .74rem/1.4 Inter,system-ui,sans-serif;letter-spacing:.095em;text-transform:uppercase}
+.overline{color:var(--gold);margin-bottom:3px}.mast h1{font:normal clamp(2.05rem,3.6vw,3.35rem)/1.06 Georgia,'Times New Roman',serif;letter-spacing:-.045em;color:var(--paper);margin:0;padding:0}
+.stamp{border-left:2px solid #b19457;padding-left:15px;display:grid;gap:3px}.stamp small{color:var(--muted)}.stamp strong{font-size:1rem;color:var(--paper)}.stamp span{font-size:.83rem;color:#c9b27e}
+.st-key-section{width:100%!important}.st-key-section [role="radiogroup"]{width:100%;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr));gap:.25rem;padding:.28rem;border:1px solid var(--line);border-radius:10px;background:#151b20;flex-wrap:nowrap}
+.st-key-section [role="radiogroup"]>div{min-width:0;display:flex}.st-key-section [data-testid="stRadioOption"]>div>div:first-child:not([data-testid="stMarkdownContainer"]){display:none}.st-key-section [role="radiogroup"] label{position:relative;display:flex!important;justify-content:center;align-items:center;flex:1 1 0;margin:0!important;min-height:50px;border-radius:6px;padding:.35rem .5rem!important;cursor:pointer;white-space:nowrap}
+.st-key-section [role="radiogroup"] label>div:first-child{position:absolute!important;opacity:0;width:1px;height:1px;overflow:hidden}
+.st-key-section [role="radiogroup"] label p{font-size:1rem;font-weight:650;margin:0;color:#c4cbcd}
+.st-key-section [role="radiogroup"] label:hover{background:#252c30}
+.st-key-section [role="radiogroup"] label:has(input:checked){background:#e5bd68}
+.st-key-section [role="radiogroup"] label:has(input:checked) p{color:#211d13}
+.st-key-section [role="radiogroup"] label:focus-within{outline:2px solid #f2d693;outline-offset:1px}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;margin:4px 0 2px}
+.stat{padding:16px 21px 15px;border-right:1px solid var(--line)}.stat:last-child{border:0}.stat-label{color:var(--muted);letter-spacing:.075em}
+.stat-value{font:550 2.12rem/1.1 Inter,system-ui,sans-serif;letter-spacing:-.055em;color:#f3f0e7;font-variant-numeric:tabular-nums;margin:4px 0}
+.stat small{font-size:.8rem;color:#aeb8b9}.stat:first-child .stat-value{color:#efd69b}
+.section-title{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:12px 0 0}
+.section-title h2{font:normal 1.75rem/1.15 Georgia,serif;letter-spacing:-.035em;padding:0;margin:0;color:var(--paper)}.section-title span{font-size:.87rem;color:var(--muted)}
+.council-wrap{overflow:hidden;border:1px solid var(--line);border-radius:10px}
+.council{border-collapse:collapse!important;border:0!important;width:100%;margin:0!important;text-align:left;color:var(--paper);font:400 .92rem/1.4 Inter,system-ui,sans-serif}
+.council thead th{background:#21282c;color:#bdc5c5;letter-spacing:.055em;text-align:left;font-size:.72rem}
+.council td,.council th{padding:11px 12px!important;border:0!important;vertical-align:middle}
+.council td{border-top:1px solid #2a3135!important}.council tbody tr:nth-child(even){background:#151b20}.council tbody tr:hover{background:#20272b}
+.council .pos{color:#95a0a4;width:36px;text-align:right;font-variant-numeric:tabular-nums}
+.council a{color:#f0ece2!important;text-decoration:none;font-weight:640;overflow-wrap:anywhere}.council a:hover,.council a:focus-visible{color:#f3d38f!important;text-decoration:underline}
+.rank-pair{white-space:nowrap;font-variant-numeric:tabular-nums;font-weight:650}.rank-pair i{font-weight:400;color:#8b989d;font-style:normal;margin:0 .25rem}
+.reason{color:#c5cdce}.score{font-variant-numeric:tabular-nums;font-weight:650}.chip,.join-tag{display:inline-block;vertical-align:middle;font:650 .78rem/1.5 Inter,system-ui,sans-serif;border-radius:4px;white-space:nowrap}
+.chip{padding:2px 8px;border:1px solid}.keep{background:#232b2e;border-color:#465258;color:#c7d1d2}.promote{background:#17332d;border-color:#32564a;color:#a3e0bc}
+.demote{background:#352b20;border-color:#665139;color:#edc38e}.monitor{background:#343022;border-color:#625837;color:#ead28f}.kick{background:#372329;border-color:#64444b;color:#f3adb1}
+.join-tag{font-size:.7rem;color:#e9ce8d;border:1px solid #5e5134;background:#29271f;padding:0 5px;margin-left:5px}.subhead{color:var(--muted);margin:0 0 5px}
+.profile{padding:18px 20px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:8px}
+.profile strong{display:block;font-size:1.3rem}.profile p{margin:5px 0 0;color:#c6ced0;font-size:.94rem}
+[data-testid="stDataFrame"]{border:1px solid var(--line);border-radius:8px;overflow:hidden}
+@media(max-width:820px){.stat{padding:12px}.council .reason-col{display:none}.mast{padding-bottom:16px}.st-key-section [role="radiogroup"] label p{font-size:.9rem}}
+@media(max-width:600px){[data-testid="stMainBlockContainer"]{padding:3rem .85rem 2rem}.mast{align-items:flex-start;gap:8px}.identity{gap:9px}.sigil{width:35px;height:42px}.sigil span{width:32px;height:38px;font-size:17px}.overline{font-size:.64rem}.mast h1{font-size:1.9rem}.stamp{padding-left:8px}.stamp small,.stamp span{font-size:.64rem}.stamp strong{font-size:.78rem}
+.st-key-section [role="radiogroup"]{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:2px}.st-key-section [role="radiogroup"]>*{grid-column:span 2}.st-key-section [role="radiogroup"] label{min-height:40px;padding:.3rem .15rem!important}.st-key-section [role="radiogroup"]>:nth-last-child(-n+2){grid-column:span 3}
+.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.stat-value{font-size:1.65rem}
+.council .score-col{display:none}.council td,.council th{padding:9px 5px!important}.council .pos{width:22px}.council{font-size:.85rem}.council .chip{font-size:.68rem;padding:1px 4px}.join-tag{display:table;margin:3px 0 0}.rank-pair i{margin:0 .08rem}.section-title h2{font-size:1.55rem}}
 </style>
-""", unsafe_allow_html=True)
-
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-BASELINE_PATH = os.path.join(DATA_DIR, "ods1_baseline.json")
-STATE_PATH = os.path.join(DATA_DIR, "ods1_persistent_state.json")
-
-DEFAULT_R5_IDS = {
-    233428447: "R5 (Leader)",
-    233185199: "R4 (Counselor / R5)",
-}
-
-DEFAULT_R4_IDS = {
-    233184542: "R4 (Warlord)",
-    233184517: "R4 (Envoy)",
-    233190616: "R4 (Officer)",
-    233196311: "R4 (Officer)",
-    233183034: "R4 (Officer)",
-    233183356: "R4 (Officer)",
-}
+"""
 
 
-def fmt_num(val: float) -> str:
-    v = float(val or 0)
-    if abs(v) >= 1e9:
-        return f"{v/1e9:.2f}B"
-    if abs(v) >= 1e6:
-        return f"{v/1e6:.2f}M"
-    if abs(v) >= 1e3:
-        return f"{v/1e3:.1f}K"
-    return f"{v:,.0f}"
+def html(markup):
+    st.html(markup)
 
 
-def ensure_record_defaults(records: list) -> list:
-    for r in records:
-        curr_rank = str(r.get("rank", "") or "")
-        clean_rank = curr_rank.replace(" (Rotated)", "").strip()
-        if clean_rank not in ["R5", "R4", "R3", "R2", "R1"]:
-            clean_rank = "R3" if (float(r.get("rok_use_all", 0) or 0) >= 40 or float(r.get("kvk_dkp", 0) or 0) >= 1500000) else "R2"
-        if not r.get("last_active_rank"):
-            r["last_active_rank"] = clean_rank
-        if "history" not in r or not isinstance(r.get("history"), list) or len(r["history"]) == 0:
-            r["history"] = [{
-                "date": "Saved Baseline",
-                "in_active": bool(r.get("in_active_126", False)),
-                "rank": curr_rank if curr_rank else clean_rank,
-                "last_active_rank": r["last_active_rank"],
-                "overall_score": float(r.get("overall_score", 0.0) or 0.0),
-                "ods1_usefulness": float(r.get("ods1_usefulness", 0.0) or 0.0),
-                "kvk_score": float(r.get("kvk_score", 0.0) or 0.0),
-                "power": float(r.get("power", 0.0) or 0.0),
-                "forts_7d": int(r.get("forts_7d", 0) or 0),
-                "tech_7d": int(r.get("tech_7d", 0) or 0),
-                "helps_7d": int(r.get("helps_7d", 0) or 0),
-                "build_7d": int(r.get("build_7d", 0) or 0),
-                "kvk_dkp": float(r.get("kvk_dkp", 0.0) or 0.0),
-            }]
-    return records
+def esc(value):
+    return escape(str(value), quote=True)
 
 
-def load_persistent_state() -> dict:
-    default_state = {
-        "custom_ranks": {},
-        "excused_ids": [],
-        "notes": {},
-        "snapshots": [],
-        "movement_log": [],
-    }
-    if os.path.exists(STATE_PATH):
-        try:
-            with open(STATE_PATH, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-                default_state.update(loaded)
-        except Exception:
-            pass
-    return default_state
+def title(label, detail=""):
+    html(f'<div class="section-title"><h2>{esc(label)}</h2><span>{esc(detail)}</span></div>')
 
 
-def save_persistent_state(state: dict) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
+def stats(values):
+    blocks = [f'<div class="stat"><div class="stat-label">{esc(label)}</div><div class="stat-value">{esc(value)}</div>'
+              f'<small>{esc(detail)}</small></div>' for label, value, detail in values]
+    html('<div class="metrics">' + ''.join(blocks) + '</div>')
 
 
-def get_available_history_dates(records: list) -> list:
-    dates = set()
-    for r in records:
-        for h in r.get("history", []):
-            if h.get("date"):
-                dates.add(h["date"])
-    return sorted(list(dates), reverse=True)
+def compact(value):
+    return f"{value / 1e6:,.1f}M" if abs(value) >= 1e6 else f"{value:,.0f}"
 
 
-def merge_uploaded_files(base_records: list, uploaded_files: list, state: dict, archive_label: str = None) -> tuple:
-    by_id = {int(r["id"]): dict(r) for r in ensure_record_defaults(base_records)}
-    prev_active_ids = {gid for gid, rec in by_id.items() if rec.get("in_active_126", False)}
-    custom_ranks = state.get("custom_ranks", {})
-
-    snap_label = archive_label or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    if by_id:
-        for gid, rec in by_id.items():
-            str_id = str(gid)
-            curr_rk = custom_ranks.get(str_id, rec.get("rank", "R2"))
-            clean_rk = str(curr_rk).replace(" (Rotated)", "")
-            if rec.get("in_active_126", False) and clean_rk in ["R5", "R4", "R3", "R2", "R1"]:
-                rec["last_active_rank"] = clean_rk
-                rec["last_seen_in_ods1"] = snap_label.split(" ")[0]
-
-            hist = list(rec.get("history", []))
-            hist_tag = f"{snap_label} (Archived)"
-            if not any(h.get("date") == hist_tag for h in hist):
-                hist.append({
-                    "date": hist_tag,
-                    "in_active": bool(rec.get("in_active_126", False)),
-                    "rank": curr_rk,
-                    "last_active_rank": rec.get("last_active_rank", clean_rk),
-                    "overall_score": float(rec.get("overall_score", 0.0) or 0.0),
-                    "ods1_usefulness": float(rec.get("ods1_usefulness", 0.0) or 0.0),
-                    "kvk_score": float(rec.get("kvk_score", 0.0) or 0.0),
-                    "power": float(rec.get("power", 0.0) or 0.0),
-                    "forts_7d": int(rec.get("forts_7d", 0) or 0),
-                    "tech_7d": int(rec.get("tech_7d", 0) or 0),
-                    "helps_7d": int(rec.get("helps_7d", 0) or 0),
-                    "build_7d": int(rec.get("build_7d", 0) or 0),
-                    "kvk_dkp": float(rec.get("kvk_dkp", 0.0) or 0.0),
-                })
-            rec["history"] = hist[-12:]
-
-    alliance_7d_dfs = []
-    alliance_alltime_dfs = []
-    kvk_dfs = []
-
-    for uf in uploaded_files:
-        fname = os.path.basename(uf) if isinstance(uf, str) else getattr(uf, "name", "uploaded.xlsx")
-        try:
-            xls = pd.ExcelFile(uf)
-            sheet_name = "Data" if "Data" in xls.sheet_names else xls.sheet_names[0]
-            df = pd.read_excel(uf, sheet_name=sheet_name)
-        except Exception as e:
-            st.error(f"Failed to read {fname}: {e}")
-            continue
-
-        cols = set(df.columns)
-        if "Alliance helps" in cols and "Forts destroyed" in cols:
-            avg_forts = df["Forts destroyed"].mean() if "Forts destroyed" in df.columns else 0
-            is_alltime = (len(df) > 165) or (avg_forts > 130)
-            if is_alltime:
-                alliance_alltime_dfs.append((fname, df))
-            else:
-                alliance_7d_dfs.append((fname, df))
-        elif "Governor ID" in cols and ("DKP" in cols or "KP" in cols):
-            if len(df) <= 1500:
-                kvk_dfs.append((fname, df))
-
-    for _, df in alliance_alltime_dfs:
-        for _, row in df.iterrows():
-            raw_id = row.get("ID")
-            if pd.isna(raw_id):
-                continue
-            gov_id = int(raw_id)
-            if gov_id not in by_id:
-                by_id[gov_id] = {
-                    "id": gov_id,
-                    "name": str(row.get("Player", f"Gov-{gov_id}")).strip(),
-                    "aliases": [],
-                    "status": "Departed / Inactive",
-                    "in_active_126": False,
-                    "in_kvk_4161": False,
-                    "is_new_joiner": False,
-                    "last_active_rank": "R2",
-                    "history": [],
-                    "power": float(row.get("Power", 0) or 0),
-                    "forts_7d": 0,
-                    "forts_all": 0,
-                    "tech_7d": 0,
-                    "tech_all": 0,
-                    "helps_7d": 0,
-                    "helps_all": 0,
-                    "rss_7d": 0,
-                    "rss_all": 0,
-                    "build_7d": 0,
-                    "build_all": 0,
-                    "rok_use_7d": 0,
-                    "rok_use_all": 0,
-                    "rok_act_7d": 0.0,
-                    "kvk_kp": 0.0,
-                    "kvk_dkp": 0.0,
-                    "kvk_t4": 0.0,
-                    "kvk_t5": 0.0,
-                    "kvk_dead": 0.0,
-                    "kvk_healed": 0.0,
-                    "kvk_acclaim": 0.0,
-                    "kvk_trades": 0.0,
-                    "kd_rank": None,
-                    "camp_rank": None,
-                    "pwr_diff": 0.0,
-                }
-
-            rec = by_id[gov_id]
-            p_name = str(row.get("Player", rec["name"])).strip()
-            if p_name and p_name != rec["name"]:
-                aliases = set(rec.get("aliases", []))
-                if rec["name"] and rec["name"] != p_name:
-                    aliases.add(rec["name"])
-                aliases.discard(p_name)
-                rec["aliases"] = sorted(list(aliases))
-                rec["name"] = p_name
-
-            rec["forts_all"] = int(row.get("Forts destroyed", rec.get("forts_all", 0)) or 0)
-            rec["tech_all"] = int(row.get("Technology points", rec.get("tech_all", 0)) or 0)
-            rec["helps_all"] = int(row.get("Alliance helps", rec.get("helps_all", 0)) or 0)
-            rec["rss_all"] = int(row.get("Resource assistance", rec.get("rss_all", 0)) or 0)
-            rec["build_all"] = int(row.get("Building time (seconds)", rec.get("build_all", 0)) or 0)
-            if "Usefulness Score" in row and pd.notna(row["Usefulness Score"]):
-                rec["rok_use_all"] = int(row["Usefulness Score"])
-            if not rec.get("in_active_126") and pd.notna(row.get("Power")):
-                rec["power"] = float(row["Power"])
-            if pd.notna(row.get("Last login")):
-                rec["last_login"] = str(row["Last login"])
-
-    joined_names = []
-    left_names = []
-
-    if alliance_7d_dfs:
-        new_active_ids = set()
-        for _, df in alliance_7d_dfs:
-            for _, row in df.iterrows():
-                raw_id = row.get("ID")
-                if pd.isna(raw_id):
-                    continue
-                new_active_ids.add(int(raw_id))
-
-        for gid, rec in by_id.items():
-            if gid not in new_active_ids:
-                if gid in prev_active_ids:
-                    prev_rk = rec.get("last_active_rank", "R2")
-                    left_names.append(f"{rec.get('name', gid)} (Was {prev_rk})")
-                rec["in_active_126"] = False
-                rec["returned_from_rotation"] = False
-                rec["forts_7d"] = 0
-                rec["tech_7d"] = 0
-                rec["helps_7d"] = 0
-                rec["rss_7d"] = 0
-                rec["build_7d"] = 0
-                rec["rok_use_7d"] = 0
-                rec["rok_act_7d"] = 0.0
-                rec["status"] = "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
-
-        for _, df in alliance_7d_dfs:
-            for _, row in df.iterrows():
-                raw_id = row.get("ID")
-                if pd.isna(raw_id):
-                    continue
-                gov_id = int(raw_id)
-                is_brand_new = gov_id not in by_id
-                if is_brand_new:
-                    by_id[gov_id] = {
-                        "id": gov_id,
-                        "name": str(row.get("Player", f"Gov-{gov_id}")).strip(),
-                        "aliases": [],
-                        "status": "Active in ODS1",
-                        "in_active_126": True,
-                        "in_kvk_4161": False,
-                        "is_new_joiner": True,
-                        "last_active_rank": "New",
-                        "history": [],
-                        "power": float(row.get("Power", 0) or 0),
-                        "forts_7d": 0,
-                        "forts_all": 0,
-                        "tech_7d": 0,
-                        "tech_all": 0,
-                        "helps_7d": 0,
-                        "helps_all": 0,
-                        "rss_7d": 0,
-                        "rss_all": 0,
-                        "build_7d": 0,
-                        "build_all": 0,
-                        "rok_use_7d": 0,
-                        "rok_use_all": 0,
-                        "rok_act_7d": 0.0,
-                        "kvk_kp": 0.0,
-                        "kvk_dkp": 0.0,
-                        "kvk_t4": 0.0,
-                        "kvk_t5": 0.0,
-                        "kvk_dead": 0.0,
-                        "kvk_healed": 0.0,
-                        "kvk_acclaim": 0.0,
-                        "kvk_trades": 0.0,
-                        "kd_rank": None,
-                        "camp_rank": None,
-                        "pwr_diff": 0.0,
-                    }
-
-                rec = by_id[gov_id]
-                p_name = str(row.get("Player", rec["name"])).strip()
-                if p_name and p_name != rec["name"]:
-                    aliases = set(rec.get("aliases", []))
-                    if rec["name"] and rec["name"] != p_name:
-                        aliases.add(rec["name"])
-                    aliases.discard(p_name)
-                    rec["aliases"] = sorted(list(aliases))
-                    rec["name"] = p_name
-
-                if gov_id not in prev_active_ids:
-                    prev_rk = rec.get("last_active_rank", "New")
-                    label_str = f"{rec['name']} (Prev: {prev_rk})"
-                    if label_str not in joined_names:
-                        joined_names.append(label_str)
-                    if not is_brand_new:
-                        rec["returned_from_rotation"] = True
-
-                rec["in_active_126"] = True
-                rec["status"] = "Active in ODS1"
-                rec["power"] = float(row.get("Power", rec["power"]) or 0)
-                rec["forts_7d"] = int(row.get("Forts destroyed", rec.get("forts_7d", 0)) or 0)
-                rec["tech_7d"] = int(row.get("Technology points", rec.get("tech_7d", 0)) or 0)
-                rec["helps_7d"] = int(row.get("Alliance helps", rec.get("helps_7d", 0)) or 0)
-                rec["rss_7d"] = int(row.get("Resource assistance", rec.get("rss_7d", 0)) or 0)
-                rec["build_7d"] = int(row.get("Building time (seconds)", rec.get("build_7d", 0)) or 0)
-
-                rec["forts_all"] = max(int(rec.get("forts_all", 0) or 0), rec["forts_7d"])
-                rec["tech_all"] = max(int(rec.get("tech_all", 0) or 0), rec["tech_7d"])
-                rec["helps_all"] = max(int(rec.get("helps_all", 0) or 0), rec["helps_7d"])
-                rec["build_all"] = max(int(rec.get("build_all", 0) or 0), rec["build_7d"])
-
-                if "Activity points" in row and pd.notna(row["Activity points"]):
-                    rec["rok_act_7d"] = float(row["Activity points"])
-                if "Usefulness Score" in row and pd.notna(row["Usefulness Score"]):
-                    rec["rok_use_7d"] = int(row["Usefulness Score"])
-                if pd.notna(row.get("Last login")):
-                    rec["last_login"] = str(row["Last login"])
-
-    for _, df in kvk_dfs:
-        df_sorted = df.reset_index(drop=True).copy()
-        df_sorted["KD_Rank_Calc"] = np.arange(1, len(df_sorted) + 1)
-        kvk_lookup = {}
-        for _, row in df_sorted.iterrows():
-            raw_gid = row.get("Governor ID")
-            if pd.notna(raw_gid):
-                kvk_lookup[int(raw_gid)] = row
-
-        for gov_id, rec in by_id.items():
-            if gov_id in kvk_lookup:
-                krow = kvk_lookup[gov_id]
-                rec["in_kvk_4161"] = True
-                rec["kd_rank"] = int(krow["KD_Rank_Calc"])
-                rec["camp_rank"] = int(krow["#"]) if "#" in krow and pd.notna(krow["#"]) else None
-                rec["pwr_diff"] = float(krow.get("Power Diff", 0) or 0)
-                rec["kvk_kp"] = float(krow.get("KP", 0) or 0)
-                rec["kvk_t4"] = float(krow.get("T4", 0) or 0)
-                rec["kvk_t5"] = float(krow.get("T5", 0) or 0)
-                rec["kvk_dead"] = float(krow.get("Dead", 0) or 0)
-                rec["kvk_dead_t4"] = float(krow.get("Dead T4", 0) or 0)
-                rec["kvk_dead_t5"] = float(krow.get("Dead T5", 0) or 0)
-                rec["kvk_healed"] = float(krow.get("Healed", 0) or 0)
-                rec["kvk_acclaim"] = float(krow.get("Acclaim", 0) or 0)
-                rec["kvk_dkp"] = float(krow.get("DKP", 0) or 0)
-                rec["kvk_trades"] = float(krow.get("Trades", 0) or 0)
-                if not rec.get("in_active_126"):
-                    rec["power"] = float(krow.get("Power", rec["power"]) or 0)
-                    rec["status"] = "Rotated Out (In KD 4161)"
-                gname = str(krow.get("Governor Name", "")).strip()
-                if gname and gname != rec["name"]:
-                    aliases = set(rec.get("aliases", []))
-                    if rec["name"]:
-                        aliases.add(rec["name"])
-                    aliases.discard(gname)
-                    rec["aliases"] = sorted(list(aliases))
-                    rec["name"] = gname
-
-    if joined_names or left_names:
-        state.setdefault("movement_log", []).insert(0, {
-            "timestamp": snap_label,
-            "joined": joined_names,
-            "left": left_names,
-        })
-
-    summary = {
-        "alltime_files": len(alliance_alltime_dfs),
-        "current_7d_files": len(alliance_7d_dfs),
-        "kvk_files": len(kvk_dfs),
-        "joined_count": len(joined_names),
-        "left_count": len(left_names),
-    }
-    return ensure_record_defaults(list(by_id.values())), summary
+def matches(rec, query):
+    term = query.strip().casefold()
+    return any(term in str(v).casefold() for v in (rec["name"], rec["id"], *(rec.get("aliases") or [])))
 
 
-def load_initial_repository_data(state: dict) -> list:
-    records = []
-    if os.path.exists(BASELINE_PATH):
-        try:
-            with open(BASELINE_PATH, "r", encoding="utf-8") as f:
-                records = ensure_record_defaults(json.load(f))
-        except Exception as e:
-            st.error(f"Error reading data/ods1_baseline.json: {e}")
-
-    excel_paths = sorted(
-        glob.glob(os.path.join(DATA_DIR, "*.xlsx")) + glob.glob(os.path.join(DATA_DIR, "*.xls"))
-    )
-    if excel_paths:
-        records, _ = merge_uploaded_files(records, excel_paths, state, archive_label="GitHub data/ Sync")
-
-    return records
+def display_name(rec):
+    tag = db.badge(rec, db.utc_day())
+    return f"{rec['name']}  ·  {tag}" if tag else rec["name"]
 
 
-def score_and_classify(
-    records: list,
-    state: dict,
-    phase_mode: str,
-    r3_cutoff: float,
-    spec_threshold: float,
-    auto_update_ranks: bool,
-    restore_returning_ranks: bool = True,
-    snapshot_date: str = "Current Live Roster",
-) -> pd.DataFrame:
-    if phase_mode == "Early KvK (Forts & Flags Focus)":
-        w_use, w_kvk = 0.55, 0.45
-    elif phase_mode == "Mid KvK (Balanced 50/50)":
-        w_use, w_kvk = 0.50, 0.50
-    else:
-        w_use, w_kvk = 0.30, 0.70
-
-    custom_ranks = state.get("custom_ranks", {})
-    excused_set = set(int(x) for x in state.get("excused_ids", []))
-    notes_map = state.get("notes", {})
-
-    rows = []
-    for r in records:
-        gov_id = int(r["id"])
-        str_id = str(gov_id)
-
-        hist_entry = None
-        if snapshot_date != "Current Live Roster":
-            for h in r.get("history", []):
-                if h.get("date") == snapshot_date:
-                    hist_entry = h
-                    break
-
-        if hist_entry is not None:
-            in_active = bool(hist_entry.get("in_active", False))
-            power = float(hist_entry.get("power", r.get("power", 0)) or 0)
-            forts_7d = int(hist_entry.get("forts_7d", 0) or 0)
-            tech_7d = int(hist_entry.get("tech_7d", 0) or 0)
-            helps_7d = int(hist_entry.get("helps_7d", 0) or 0)
-            build_7d = int(hist_entry.get("build_7d", 0) or 0)
-            kvk_dkp = float(hist_entry.get("kvk_dkp", r.get("kvk_dkp", 0)) or 0)
-        else:
-            in_active = bool(r.get("in_active_126", False))
-            power = float(r.get("power", 0) or 0)
-            forts_7d = int(r.get("forts_7d", 0) or 0)
-            tech_7d = int(r.get("tech_7d", 0) or 0)
-            helps_7d = int(r.get("helps_7d", 0) or 0)
-            build_7d = int(r.get("build_7d", 0) or 0)
-            kvk_dkp = float(r.get("kvk_dkp", 0) or 0)
-
-        in_kvk = bool(r.get("in_kvk_4161", False))
-        forts_all = int(r.get("forts_all", 0) or 0)
-        tech_all = int(r.get("tech_all", 0) or 0)
-        helps_all = int(r.get("helps_all", 0) or 0)
-        build_all = int(r.get("build_all", 0) or 0)
-        kvk_kp = float(r.get("kvk_kp", 0) or 0)
-        kvk_healed = float(r.get("kvk_healed", 0) or 0)
-        kvk_acclaim = float(r.get("kvk_acclaim", 0) or 0)
-        rok_use_all = int(r.get("rok_use_all", 0) or 0)
-        last_active_rank = str(r.get("last_active_rank", "R2") or "R2")
-        returned_flag = bool(r.get("returned_from_rotation", False))
-
-        if in_active:
-            s_forts = min(forts_7d / 200.0, 1.0) * 52.0
-            s_tech = min(tech_7d / 100000.0, 1.0) * 20.0
-            s_build = min(build_7d / 90000.0, 1.0) * 20.0
-            s_helps = min(helps_7d / 2500.0, 1.0) * 8.0
-            use_score = round(s_forts + s_tech + s_build + s_helps, 1)
-        else:
-            use_score = float(rok_use_all)
-
-        pwr_m = power / 1e6
-        if pwr_m < 12.0:
-            t_ratio = 0.10
-        elif pwr_m <= 20.0:
-            t_ratio = 0.15
-        else:
-            t_ratio = 0.22
-        ratio = (kvk_dkp / power) if power > 0 else 0.0
-        r_score = min(ratio / t_ratio, 1.0) * 75.0
-        h_bonus = min(kvk_healed / 500000.0, 1.0) * 15.0
-        a_bonus = min(kvk_acclaim / 50000.0, 1.0) * 10.0
-        kvk_score = round(min(r_score + h_bonus + a_bonus, 100.0), 1)
-
-        overall = round(min((w_use * use_score) + (w_kvk * kvk_score), 100.0), 1)
-
-        is_excused = gov_id in excused_set
-        is_specialist = (use_score >= spec_threshold) or (kvk_score >= 75.0)
-
-        if gov_id in DEFAULT_R5_IDS:
-            rec_rank = "R5"
-            bucket = "Leadership (R5/R4)"
-            reason = DEFAULT_R5_IDS[gov_id]
-        elif gov_id in DEFAULT_R4_IDS:
-            rec_rank = "R4"
-            bucket = "Leadership (R5/R4)"
-            reason = DEFAULT_R4_IDS[gov_id]
-        elif not in_active:
-            if in_kvk and (
-                rok_use_all >= 10
-                or kvk_dkp >= 500000
-                or "ᴼᴰ" in str(r.get("name", ""))
-                or "OD" in str(r.get("name", ""))
-            ):
-                rec_rank = last_active_rank if last_active_rank in ["R3", "R2"] else ("R3" if kvk_dkp >= 1500000 else "R2")
-                bucket = "Rotated Out (Active KD)"
-                reason = f"Rotated out in KD 4161 (Held {last_active_rank})"
-            else:
-                rec_rank = "Left"
-                bucket = "Departed / Left"
-                reason = f"Left ODS1 (Last Rank: {last_active_rank})"
-        else:
-            if is_excused:
-                rec_rank = custom_ranks.get(str_id, last_active_rank)
-                bucket = "Excused (Protected)"
-                reason = f"Excused / rebuild protection (Held {last_active_rank})"
-            elif returned_flag and restore_returning_ranks and last_active_rank in ["R3", "R2"]:
-                calc_rank = "R3" if (is_specialist or overall >= r3_cutoff) else "R2"
-                rec_rank = "R3" if (last_active_rank == "R3" or calc_rank == "R3") else "R2"
-                bucket = "Promote / Keep R3" if rec_rank == "R3" else "Keep (R2 Core)"
-                reason = f"Returned — Restored {last_active_rank}"
-            elif is_specialist or overall >= r3_cutoff:
-                rec_rank = "R3"
-                bucket = "Promote / Keep R3"
-                reason = "Specialist Immunity" if (is_specialist and overall < r3_cutoff) else "Top-Tier Core"
-            elif overall >= 24.0 or use_score >= 30.0 or kvk_score >= 40.0:
-                rec_rank = "R2"
-                bucket = "Keep (R2 Core)"
-                reason = "Standard contributor"
-            elif overall >= 12.0 or rok_use_all >= 30:
-                rec_rank = "R1"
-                bucket = "Monitor / Warn (R1)"
-                reason = "Veteran slump — check in" if rok_use_all >= 30 else "Below standard — warn"
-            else:
-                rec_rank = "Kick"
-                bucket = "Kick Candidate"
-                reason = "Low Usefulness & low KvK"
-
-        if hist_entry is not None:
-            active_rank = str(hist_entry.get("rank", rec_rank))
-        else:
-            saved_rank = custom_ranks.get(str_id)
-            if auto_update_ranks:
-                active_rank = rec_rank
-                custom_ranks[str_id] = rec_rank
-            else:
-                active_rank = saved_rank if saved_rank else rec_rank
-
-            if in_active and active_rank in ["R5", "R4", "R3", "R2", "R1"]:
-                r["last_active_rank"] = active_rank
-
-        rows.append({
-            **r,
-            "id": gov_id,
-            "in_active_126": in_active,
-            "power": power,
-            "power_m": round(power / 1e6, 2),
-            "forts_7d": forts_7d,
-            "forts_all": forts_all,
-            "tech_7d": tech_7d,
-            "tech_all": tech_all,
-            "helps_7d": helps_7d,
-            "helps_all": helps_all,
-            "build_7d": build_7d,
-            "build_hrs_7d": round(build_7d / 3600.0, 1),
-            "build_hrs_all": round(build_all / 3600.0, 1),
-            "rok_use_all": rok_use_all,
-            "kvk_dkp": kvk_dkp,
-            "kvk_dkp_m": round(kvk_dkp / 1e6, 2),
-            "kvk_kp": kvk_kp,
-            "kvk_kp_m": round(kvk_kp / 1e6, 2),
-            "kvk_healed": kvk_healed,
-            "kvk_healed_k": round(kvk_healed / 1e3, 1),
-            "kvk_acclaim": kvk_acclaim,
-            "dkp_ratio_pct": round(ratio * 100.0, 1),
-            "ods1_usefulness": use_score,
-            "kvk_score": kvk_score,
-            "overall_score": overall,
-            "last_active_rank": last_active_rank,
-            "is_specialist": is_specialist,
-            "is_excused": is_excused,
-            "recommended_rank": rec_rank,
-            "rank": active_rank,
-            "bucket": bucket,
-            "reason": reason,
-            "alias_str": ", ".join(r.get("aliases", [])),
-            "officer_note": notes_map.get(str_id, ""),
-        })
-
-    df_out = pd.DataFrame(rows)
-    if df_out.empty:
-        return df_out
-    return df_out.sort_values(by=["overall_score", "kvk_dkp"], ascending=[False, False]).reset_index(drop=True)
-
-
-def render_table(df: pd.DataFrame) -> None:
-    col_cfg = {
-        "id": st.column_config.NumberColumn("Governor ID", format="%d"),
-        "name": st.column_config.TextColumn("Governor", width="medium"),
-        "alias_str": st.column_config.TextColumn("Former Name(s)", width="small"),
-        "rank": st.column_config.TextColumn("Rank", width="small"),
-        "last_active_rank": st.column_config.TextColumn("Prev Rank", width="small"),
-        "bucket": st.column_config.TextColumn("Decision Bucket", width="medium"),
-        "overall_score": st.column_config.ProgressColumn(
-            "Overall Score", min_value=0, max_value=100, format="%.1f"
-        ),
-        "ods1_usefulness": st.column_config.ProgressColumn(
-            "7d Usefulness", min_value=0, max_value=100, format="%.1f"
-        ),
-        "rok_use_all": st.column_config.ProgressColumn(
-            "All-Time Usefulness", min_value=0, max_value=100, format="%d"
-        ),
-        "kvk_score": st.column_config.ProgressColumn(
-            "KvK Score", min_value=0, max_value=100, format="%.1f"
-        ),
-        "power_m": st.column_config.NumberColumn("Power (M)", format="%.2fM"),
-        "kvk_dkp_m": st.column_config.NumberColumn("KvK DKP (M)", format="%.2fM"),
-        "kvk_kp_m": st.column_config.NumberColumn("KvK KP (M)", format="%.2fM"),
-        "dkp_ratio_pct": st.column_config.NumberColumn("DKP / Power", format="%.1f%%"),
-        "forts_7d": st.column_config.NumberColumn("Forts (7d)", format="%d"),
-        "forts_all": st.column_config.NumberColumn("All-Time Forts", format="%d"),
-        "tech_7d": st.column_config.NumberColumn("Tech (7d)", format="%d"),
-        "tech_all": st.column_config.NumberColumn("All-Time Tech", format="%d"),
-        "helps_7d": st.column_config.NumberColumn("Helps (7d)", format="%d"),
-        "helps_all": st.column_config.NumberColumn("All-Time Helps", format="%d"),
-        "build_hrs_7d": st.column_config.NumberColumn("Flags 7d (Hrs)", format="%.1fh"),
-        "build_hrs_all": st.column_config.NumberColumn("All-Time Flags (Hrs)", format="%.1fh"),
-        "kd_rank": st.column_config.NumberColumn("KD Rank", format="#%d"),
-        "kvk_healed_k": st.column_config.NumberColumn("Healed (K)", format="%.1fK"),
-        "reason": st.column_config.TextColumn("Status / Protection", width="medium"),
-    }
-    active_cfg = {k: v for k, v in col_cfg.items() if k in df.columns}
-    st.dataframe(df, column_config=active_cfg, use_container_width=True, hide_index=True)
-
-
-def render_podium(df: pd.DataFrame, val_col: str, suffix: str = "") -> None:
-    top3 = df.head(3).to_dict("records")
-    if not top3:
+def frame_table(rows, key, empty="No governors match this view."):
+    if not rows:
+        st.info(empty)
         return
-    medals = ["🥇 #1", "🥈 #2", "🥉 #3"]
-    cards_html = '<div class="podium-grid">'
-    for idx, row in enumerate(top3):
-        val = row.get(val_col, 0)
-        val_str = f"{val:,.0f}{suffix}" if isinstance(val, (int, float)) else f"{val}{suffix}"
-        cards_html += (
-            f'<div class="podium-card">'
-            f'<div class="podium-rank">{medals[idx]}</div>'
-            f'<div class="podium-name">{row.get("name", "")}</div>'
-            f'<div class="podium-stat">{val_str}</div>'
-            f'</div>'
-        )
-    cards_html += "</div>"
-    st.markdown(cards_html, unsafe_allow_html=True)
+    frame = pd.DataFrame(rows)
+    frame.insert(0, "#", range(1, len(frame) + 1))
+    st.dataframe(frame, hide_index=True, use_container_width=True, key=key)
 
 
-def build_discord_briefing(df: pd.DataFrame, phase_mode: str) -> str:
-    active = df[df["in_active_126"]]
-    r3_list = active[active["rank"] == "R3"]["name"].tolist()
-    warn_list = active[active["bucket"] == "Monitor / Warn (R1)"]["name"].tolist()
-    kick_list = active[active["bucket"] == "Kick Candidate"]["name"].tolist()
-    rot_df = df[df["bucket"] == "Rotated Out (Active KD)"].sort_values(by="kvk_dkp", ascending=False).head(12)
-    rot_list = [f"{row['name']} (Held {row['last_active_rank']})" for _, row in rot_df.iterrows()]
-
-    lines = [
-        f"**ODS1 (KD 4161) — KvK 1 Briefing | {phase_mode}**",
-        f"Active Roster: **{len(active)}** | R3 Core: **{len(r3_list)}** ({len(r3_list)/max(len(active),1)*100:.1f}%)",
-        "",
-        f"**R3 Core / Specialists ({len(r3_list)}):** " + (", ".join(r3_list[:25]) + ("..." if len(r3_list) > 25 else "")),
-        f"**Monitor / Warn ({len(warn_list)}):** " + (", ".join(warn_list) if warn_list else "None"),
-        f"**Kick Candidates ({len(kick_list)}):** " + (", ".join(kick_list) if kick_list else "None"),
-        f"**Top Rotated Active in KD 4161:** " + (", ".join(rot_list) if rot_list else "None"),
-    ]
-    return chr(10).join(lines)
+def open_import():
+    st.session_state.section = "Officer desk"
+    st.session_state.officer_mode = "Import reports"
 
 
-if "state" not in st.session_state:
-    st.session_state.state = load_persistent_state()
-
-if "base_records" not in st.session_state:
-    st.session_state.base_records = load_initial_repository_data(st.session_state.state)
-
-state = st.session_state.state
-avail_dates = get_available_history_dates(st.session_state.base_records)
-
-# --- ULTRA-CLEAN 3-STEP SIDEBAR ---
-with st.sidebar:
-    st.markdown("## ⚔️ ODS1 Command")
-    st.caption("Kingdom 4161 • KvK 1")
-
-    # 1. Simple Upload Box
-    st.markdown("### 1. Upload ROKSTATS Files")
-    uploaded_files = st.file_uploader(
-        "Drop All-Time, Current 7d, or KvK .xlsx",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
-    )
-
-    if uploaded_files:
-        if st.button("🔄 Update Dashboard", type="primary", use_container_width=True):
-            updated_records, summary = merge_uploaded_files(st.session_state.base_records, uploaded_files, state)
-            st.session_state.base_records = updated_records
-            with open(BASELINE_PATH, "w", encoding="utf-8") as f:
-                json.dump(updated_records, f, ensure_ascii=False, indent=2)
-            save_persistent_state(state)
-            st.success(f"Updated! (+{summary['joined_count']} joined, -{summary['left_count']} left)")
+def review_page(scored):
+    active = [r for r in scored if r["in_active_126"]]
+    counts = {action: sum(r["action"] == action for r in active) for action in db.ACTIONS}
+    stats([("Active roster", len(active), "In the saved ODS1 roster"),
+           ("Rank changes", counts["Promote"] + counts["Demote"], f'{counts["Promote"]} promote · {counts["Demote"]} demote'),
+           ("Check-ins", counts["Monitor / warn"], "Monitor / warn queue"),
+           ("Kick review", counts["Kick"], "Officer decision required")])
+    heading, upload = st.columns([4, 1])
+    with heading:
+        title("Weekly review", f"{len(active)} active governors")
+    upload.button("Import reports", type="primary", on_click=open_import, key="open_import", use_container_width=True)
+    a, b, c = st.columns([2.1, 1.15, 1])
+    query = a.text_input("Find a governor", placeholder="Name, alias or Governor ID", key="review_search")
+    action = b.selectbox("Decision", ("All decisions", *db.ACTIONS), key="action_filter")
+    rank = c.selectbox("Saved rank", ("All ranks", *db.RANKS, "Unrecorded"), key="rank_filter")
+    selected = [r for r in active if matches(r, query) and (action == "All decisions" or r["action"] == action)
+                and (rank == "All ranks" or (r["held"] or "Unrecorded") == rank)]
+    selected.sort(key=lambda r: (PRIORITY[r["action"]], -r["overall"] if r["action"] in ("Promote", "Keep current rank") else r["overall"],
+                                r["name"].casefold(), r["id"]))
+    if not selected:
+        st.info("No governors match these filters.")
+        return
+    signature = (query, action, rank)
+    if st.session_state.get("review_signature") != signature:
+        st.session_state.review_page = 1
+        st.session_state.review_signature = signature
+    pages = (len(selected) + 14) // 15
+    page = min(int(st.session_state.get("review_page", 1)), pages)
+    start = (page - 1) * 15
+    rows = []
+    for number, rec in enumerate(selected[start:start + 15], start=start + 1):
+        joined = db.badge(rec, db.utc_day())
+        tag = f'<span class="join-tag">{esc(joined)}</span>' if joined else ""
+        decision = rec["action"]
+        rows.append(f'<tr><td class="pos">{number}.</td><td><a target="_self" href="?governor={int(rec["id"])}">{esc(rec["name"])}</a>{tag}</td>'
+                    f'<td class="rank-pair">{esc(rec["held"] or "—")}<i>→</i>{esc(rec["proposed"] or "—")}</td>'
+                    f'<td><span class="chip {ACTION_STYLE[decision]}">{esc(SHORT_ACTION.get(decision, decision))}</span></td>'
+                    f'<td class="score score-col">{rec["overall"]:.1f}</td><td class="reason reason-col">{esc(rec["reason"])}</td></tr>')
+    html('<div class="council-wrap"><table class="council"><thead><tr><th class="pos">#</th><th>Governor</th>'
+         '<th>Saved → suggested</th><th>Decision</th><th class="score-col">Overall</th><th class="reason-col">Reason</th>'
+         '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
+    a, b, c = st.columns([2.2, 1, 1])
+    a.caption(f"{start + 1}–{min(start + 15, len(selected))} of {len(selected)} · Rank changes first")
+    if pages > 1:
+        if b.button("Previous", disabled=page == 1, key="previous_review", use_container_width=True):
+            st.session_state.review_page = page - 1
             st.rerun()
+        if c.button("Next", disabled=page == pages, key="next_review", use_container_width=True):
+            st.session_state.review_page = page + 1
+            st.rerun()
+    csv_rows = [{"#": idx, "Governor ID": r["id"], "Governor": r["name"], "Saved rank": r["held"],
+                 "Suggested rank": r["proposed"], "Decision": r["action"], "Reason": r["reason"],
+                 "Overall": r["overall"], "Support": r["support"], "KvK": r["war"], "Officer note": r.get("officer_note", "")}
+                for idx, r in enumerate(selected, start=1)]
+    st.download_button("Download filtered review", pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8-sig"),
+                       "ods1-roster-review.csv", "text/csv")
 
-    st.markdown("---")
 
-    # 2. Simple KvK Phase Switcher
-    st.markdown("### 2. KvK Stage")
-    phase_mode = st.radio(
-        "Select current KvK focus:",
-        [
-            "Early KvK (Forts & Flags Focus)",
-            "Mid KvK (Balanced 50/50)",
-            "Late KvK (Pass & King's Land War)",
-        ],
-        index=0,
-        label_visibility="collapsed",
-    )
-
-    # 3. Clean Summary of How Ranks Work
-    st.markdown("### 3. Rank Rules")
-    st.markdown(
-        """
-        <div class="rules-card">
-            • <b>R4 / R5:</b> Locked Leadership<br>
-            • <b>R3 (Top ~30%):</b> Score <b>45+</b> OR Specialist (<b>55+</b> Usefulness or <b>75+</b> KvK)<br>
-            • <b>R2 (Core):</b> Score <b>24 – 44</b><br>
-            • <b>R1 (Warn):</b> Score <b>12 – 23</b><br>
-            • <b>Kick:</b> Score <b>Under 12</b>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Everything else tucked neatly inside one optional Settings & History drawer
-    with st.expander("⚙️ Past Weeks & Advanced Settings", expanded=False):
-        snapshot_date = st.selectbox(
-            "🕒 View Past Week Snapshot",
-            options=["Current Live Roster"] + avail_dates,
-            index=0,
-        )
-        r3_cutoff = st.slider("R3 Score Cutoff", min_value=30.0, max_value=75.0, value=45.0, step=1.0)
-        spec_threshold = st.slider("Specialist Usefulness Cutoff", min_value=40.0, max_value=85.0, value=55.0, step=1.0)
-        auto_update_ranks = st.toggle("Auto-Assign Ranks on Upload", value=True)
-        restore_returning_ranks = st.toggle("Restore Rank When Member Returns", value=True)
-        st.markdown("---")
-        baseline_json_str = json.dumps(st.session_state.base_records, ensure_ascii=False, indent=2)
-        st.download_button(
-            "⬇️ Download Database (ods1_baseline.json)",
-            data=baseline_json_str,
-            file_name="ods1_baseline.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
-df_all = score_and_classify(
-    st.session_state.base_records,
-    state,
-    phase_mode=phase_mode,
-    r3_cutoff=r3_cutoff,
-    spec_threshold=spec_threshold,
-    auto_update_ranks=auto_update_ranks,
-    restore_returning_ranks=restore_returning_ranks,
-    snapshot_date=snapshot_date,
-)
-save_persistent_state(state)
-
-active_df = df_all[df_all["in_active_126"]].copy()
-rotated_df = df_all[(~df_all["in_active_126"]) & (df_all["in_kvk_4161"])].copy()
-departed_df = df_all[(~df_all["in_active_126"]) & (~df_all["in_kvk_4161"])].copy()
-
-r3_count = int((active_df["rank"] == "R3").sum())
-r3_pct = (r3_count / max(len(active_df), 1)) * 100.0
-r2_count = int((active_df["rank"] == "R2").sum())
-warn_count = int((active_df["bucket"] == "Monitor / Warn (R1)").sum())
-kick_count = int((active_df["bucket"] == "Kick Candidate").sum())
-total_ods1_dkp = active_df["kvk_dkp"].sum() + rotated_df["kvk_dkp"].sum()
-
-# Hero Banner
-st.markdown(
-    f"""
-    <div class="hero-banner">
-        <div>
-            <h1 class="hero-title">⚔️ ODYSSEY1 (ODS1) Command Center</h1>
-            <div class="hero-sub">Kingdom 4161 • KvK 1 Roster &amp; Performance Tracker</div>
-        </div>
-        <div class="hero-badges">
-            <span class="pill-gold">{phase_mode}</span>
-            <span class="pill-blue">R5: MA7ZM &amp; ᴼᴰ AYHAM</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Color-Coded KPI Cards
-st.markdown(
-    f"""
-    <div class="kpi-row">
-        <div class="kpi-box accent-blue">
-            <div class="kpi-head">Active in ODS1</div>
-            <div class="kpi-num">{len(active_df)}</div>
-            <div class="kpi-foot">+{len(rotated_df)} rotated out in KD 4161</div>
-        </div>
-        <div class="kpi-box accent-green">
-            <div class="kpi-head">R3 Core &amp; Specialists</div>
-            <div class="kpi-num">{r3_count} ({r3_pct:.0f}%)</div>
-            <div class="kpi-foot">R2 Core: {r2_count} members</div>
-        </div>
-        <div class="kpi-box accent-amber">
-            <div class="kpi-head">Monitor / Warn (R1)</div>
-            <div class="kpi-num">{warn_count}</div>
-            <div class="kpi-foot">Low 7d output or veteran slump</div>
-        </div>
-        <div class="kpi-box accent-red">
-            <div class="kpi-head">Kick Candidates</div>
-            <div class="kpi-num">{kick_count}</div>
-            <div class="kpi-foot">Low 7d &amp; low All-Time effort</div>
-        </div>
-        <div class="kpi-box accent-purple">
-            <div class="kpi-head">ODS1 Combined DKP</div>
-            <div class="kpi-num">{fmt_num(total_ods1_dkp)}</div>
-            <div class="kpi-foot">Active + Rotated in #4161</div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-# Search Bar
-search_q = st.text_input(
-    "🔍 Search Governor",
-    placeholder="Search by Governor name, former alias (e.g. A c e ツ), or ID...",
-    label_visibility="collapsed",
-)
-
-if search_q.strip():
-    q = search_q.strip().lower()
-    mask = (
-        df_all["name"].str.lower().str.contains(q, na=False)
-        | df_all["alias_str"].str.lower().str.contains(q, na=False)
-        | df_all["id"].astype(str).str.contains(q, na=False)
-    )
-    filtered_df = df_all[mask].copy()
-else:
-    filtered_df = df_all.copy()
-
-# 5 Clean, Uncluttered Top-Level Tabs
-tabs = st.tabs([
-    "Decision Buckets",
-    "Usefulness & Activity",
-    "KvK War (#4161)",
-    "Rotations & Past Ranks",
-    "Manage Ranks",
-])
-
-# TAB 0: Clean Decision Buckets (Only essential columns!)
-with tabs[0]:
-    active_filtered = filtered_df[filtered_df["in_active_126"]].copy()
-
-    bucket_specs = [
-        ("Leadership (R5/R4)", "👑 Command Leadership (R5 / R4)", "bucket-r5", True),
-        ("Promote / Keep R3", "🟢 R3 Elite Core & Specialists", "bucket-r3", True),
-        ("Keep (R2 Core)", "🔵 R2 Standard Core", "bucket-r2", False),
-        ("Monitor / Warn (R1)", "🟠 R1 Monitor / Warning List", "bucket-r1", True),
-        ("Kick Candidate", "🔴 Kick Candidates", "bucket-kick", True),
-    ]
-
-    cols_bucket = [
-        "name", "rank", "overall_score", "ods1_usefulness", "kvk_score",
-        "power_m", "kvk_dkp_m", "forts_7d", "tech_7d", "build_hrs_7d", "reason"
-    ]
-
-    for b_key, b_title, b_css, default_open in bucket_specs:
-        sub_df = active_filtered[active_filtered["bucket"] == b_key]
-        st.markdown(
-            f'<div class="bucket-banner {b_css}"><span>{b_title}</span><span>{len(sub_df)} Members</span></div>',
-            unsafe_allow_html=True,
-        )
-        with st.expander(f"View {b_title} ({len(sub_df)})", expanded=default_open):
-            render_table(sub_df[cols_bucket])
-
-# TAB 1: Usefulness & Activity (Combines Usefulness + Forts/Tech/Helps cleanly)
-with tabs[1]:
-    u_view = st.radio(
-        "View Mode",
-        ["Current 7-Day Activity", "All-Time ODS1 Totals", "Top 25 Podiums (Forts • Tech • Flags)"],
-        horizontal=True,
-        label_visibility="collapsed",
-    )
-    if u_view == "Current 7-Day Activity":
-        u_df = filtered_df[filtered_df["in_active_126"]].sort_values(by="ods1_usefulness", ascending=False)
-        render_podium(u_df, "ods1_usefulness", " / 100 Usefulness")
-        render_table(u_df[[
-            "name", "rank", "ods1_usefulness", "rok_use_all",
-            "forts_7d", "tech_7d", "build_hrs_7d", "helps_7d", "forts_all", "reason"
-        ]])
-    elif u_view == "All-Time ODS1 Totals":
-        u_df = filtered_df.sort_values(by="rok_use_all", ascending=False)
-        render_podium(u_df, "forts_all", " All-Time Forts")
-        render_table(u_df[[
-            "name", "status", "last_active_rank", "rok_use_all",
-            "forts_all", "tech_all", "build_hrs_all", "helps_all", "power_m", "kvk_dkp_m"
-        ]])
+def activity_page(scored):
+    title("Alliance activity")
+    a, b = st.columns([1.5, 1])
+    period = a.radio("Period", ("Weekly", "All-time", "Top 25"), horizontal=True, key="activity_period")
+    query = b.text_input("Find a governor", placeholder="Name, alias or ID", key="activity_search")
+    members = [r for r in scored if matches(r, query) and (period == "All-time" or r["in_active_126"])]
+    if period == "All-time":
+        rows = sorted(members, key=lambda r: (-db.n(r.get("rok_use_all")), r["id"]))
+        frame_table([{"Governor": display_name(r), "Roster status": r.get("status"), "Usefulness": r.get("rok_use_all"),
+                      "Forts": r.get("forts_all"), "Tech points": r.get("tech_all"), "Flag hours": round(db.n(r.get("build_all")) / 3600, 1),
+                      "Helps": r.get("helps_all"), "RSS assistance": r.get("rss_all")} for r in rows], "lifetime")
+    elif period == "Top 25":
+        metric = st.radio("Leaderboard", ("Forts", "Tech points", "Flag hours"), horizontal=True)
+        field = {"Forts": "forts_7d", "Tech points": "tech_7d", "Flag hours": "build_7d"}[metric]
+        rows = sorted(members, key=lambda r: (-db.n(r.get(field)), r["id"]))[:25]
+        frame_table([{"Governor": display_name(r), metric: round(db.n(r.get(field)) / 3600, 1) if metric == "Flag hours" else r.get(field),
+                      "Support score": r["support"]} for r in rows], "top25")
     else:
-        c_f, c_t, c_h = st.columns(3)
-        with c_f:
-            st.markdown("#### 🏰 Top in Forts (7d)")
-            f_top = active_df.sort_values(by="forts_7d", ascending=False)
-            render_podium(f_top, "forts_7d", " Forts")
-            render_table(f_top[["name", "forts_7d", "forts_all", "ods1_usefulness"]].head(25))
-        with c_t:
-            st.markdown("#### 📜 Top in Tech (7d)")
-            t_top = active_df.sort_values(by="tech_7d", ascending=False)
-            render_podium(t_top, "tech_7d", " Tech")
-            render_table(t_top[["name", "tech_7d", "ods1_usefulness"]].head(25))
-        with c_h:
-            st.markdown("#### 🤝 Top in Flag Hours (7d)")
-            h_top = active_df.sort_values(by="build_hrs_7d", ascending=False)
-            render_podium(h_top, "build_hrs_7d", "h Flags")
-            render_table(h_top[["name", "build_hrs_7d", "helps_7d", "ods1_usefulness"]].head(25))
+        rows = sorted(members, key=lambda r: (-r["support"], r["id"]))
+        frame_table([{"Governor": display_name(r), "Support / 100": r["support"], "Activity Points": r.get("rok_act_7d"),
+                      "RokStats usefulness": r.get("rok_use_7d"), "Forts": r.get("forts_7d"), "Tech points": r.get("tech_7d"),
+                      "Flag hours": round(db.n(r.get("build_7d")) / 3600, 1), "Helps": r.get("helps_7d"),
+                      "RSS assistance": r.get("rss_7d")} for r in rows], "weekly")
 
-# TAB 2: KvK War Leaderboard
-with tabs[2]:
-    k_df = filtered_df[filtered_df["in_kvk_4161"]].sort_values(by="kvk_dkp", ascending=False)
-    render_podium(k_df, "kvk_dkp", " DKP")
-    render_table(k_df[[
-        "kd_rank", "name", "status", "rank",
-        "kvk_score", "power_m", "kvk_kp_m", "kvk_dkp_m", "dkp_ratio_pct", "kvk_healed_k"
-    ]])
 
-# TAB 3: Rotations, Past Ranks & Movement Log (Where `Prev Rank` actually matters!)
-with tabs[3]:
-    if state.get("movement_log"):
-        st.markdown("#### 📋 Recent Joins & Leaves")
-        for entry in state["movement_log"][:5]:
-            st.info(
-                f"**{entry['timestamp']}** — "
-                f"**Joined / Returned:** {', '.join(entry['joined']) if entry['joined'] else 'None'} | "
-                f"**Rotated Out / Left:** {', '.join(entry['left']) if entry['left'] else 'None'}"
-            )
+def war_page(scored):
+    fighters = [r for r in scored if r.get("in_kvk_4161")]
+    title("KvK war", "Kingdom 4161")
+    stats([("Tracked fighters", len(fighters), "ODS1-linked governor IDs"),
+           ("Combined DKP", compact(sum(db.n(r.get("kvk_dkp")) for r in fighters)), "Active and rotated members"),
+           ("Kill points", compact(sum(db.n(r.get("kvk_kp")) for r in fighters)), "Recorded in the KvK export"),
+           ("Troops healed", compact(sum(db.n(r.get("kvk_healed")) for r in fighters)), "Recorded in the KvK export")])
+    query = st.text_input("Find a fighter", placeholder="Name, alias or ID", key="war_search")
+    fighters = sorted((r for r in fighters if matches(r, query)), key=lambda r: (-db.n(r.get("kvk_dkp")), r["id"]))
+    frame_table([{"Governor": display_name(r), "KD rank": r.get("kd_rank"), "KvK / 100": r["war"], "DKP": r.get("kvk_dkp"),
+                  "Kill points": r.get("kvk_kp"), "Power": r.get("power"), "Healed": r.get("kvk_healed"),
+                  "Acclaim": r.get("kvk_acclaim"), "Status": r.get("status")} for r in fighters], "war_table")
 
-    col_rot, col_aka = st.columns([1.35, 1.0])
-    with col_rot:
-        st.markdown("#### 🔁 Rotated Out in KD 4161 (Shows Previous ODS1 Rank)")
-        render_table(rotated_df.sort_values(by="kvk_dkp", ascending=False)[[
-            "name", "last_active_rank", "kd_rank", "power_m", "kvk_dkp_m", "forts_all"
-        ]])
-    with col_aka:
-        st.markdown("#### 🏷️ Name Changes (Aliases)")
-        changed_df = df_all[df_all["alias_str"].str.len() > 0]
-        render_table(changed_df[[
-            "name", "alias_str", "last_active_rank", "status"
-        ]])
 
-    with st.expander(f"🚪 Departed / Inactive Historical Members ({len(departed_df)})", expanded=False):
-        render_table(departed_df.sort_values(by="forts_all", ascending=False)[[
-            "name", "last_active_rank", "power_m", "forts_all", "tech_all", "rok_use_all"
-        ]])
+def snapshot_rows(records, label):
+    rows = []
+    for rec in records:
+        entry = next((h for h in rec.get("history", []) if h.get("date") == label), None)
+        if entry is None:
+            continue
+        rows.append({"Governor": entry.get("name") or f'ID {rec["id"]}', "Governor ID": rec["id"],
+                     "In ODS1": bool(entry.get("in_active")), "Saved rank": entry.get("rank"),
+                     "Prior rank": entry.get("last_active_rank"), "Overall": entry.get("overall_score"),
+                     "Support": entry.get("ods1_usefulness"), "KvK": entry.get("kvk_score"), "Forts": entry.get("forts_7d"),
+                     "Tech points": entry.get("tech_7d"), "DKP": entry.get("kvk_dkp")})
+    return sorted(rows, key=lambda r: (not r["In ODS1"], -(r["Overall"] if r["Overall"] is not None else -1), r["Governor ID"]))
 
-# TAB 4: Manage Ranks & Briefing
-with tabs[4]:
-    col_mgr, col_disc = st.columns([1.1, 1.2])
-    with col_mgr:
-        st.markdown("#### ✏️ Override Player Rank")
-        sel_player = st.selectbox(
-            "Select Governor",
-            options=df_all["id"].tolist(),
-            format_func=lambda gid: f"{df_all[df_all['id']==gid]['name'].values[0]} — Current: {df_all[df_all['id']==gid]['rank'].values[0]} (Prev: {df_all[df_all['id']==gid]['last_active_rank'].values[0]})",
-        )
-        curr_row = df_all[df_all["id"] == sel_player].iloc[0]
-        new_rank_choice = st.selectbox(
-            "Set Rank",
-            ["R5", "R4", "R3", "R2", "R1", "Kick"],
-            index=["R5", "R4", "R3", "R2", "R1", "Kick"].index(curr_row["rank"]) if curr_row["rank"] in ["R5", "R4", "R3", "R2", "R1", "Kick"] else 3,
-        )
-        excused_choice = st.checkbox("Mark Excused (Rebuild / Vacation Immunity)", value=bool(curr_row["is_excused"]))
-        note_choice = st.text_input("Officer Note", value=str(curr_row["officer_note"]))
 
-        if st.button("💾 Save Rank", type="primary"):
-            state["custom_ranks"][str(sel_player)] = new_rank_choice
-            for rec in st.session_state.base_records:
-                if int(rec["id"]) == int(sel_player) and new_rank_choice in ["R5", "R4", "R3", "R2", "R1"]:
-                    rec["last_active_rank"] = new_rank_choice
-            exc_list = set(int(x) for x in state.get("excused_ids", []))
-            if excused_choice:
-                exc_list.add(int(sel_player))
-            else:
-                exc_list.discard(int(sel_player))
-            state["excused_ids"] = sorted(list(exc_list))
-            state["notes"][str(sel_player)] = note_choice
-            save_persistent_state(state)
-            st.success("Saved!")
+def rotations_page(scored):
+    title("Rotations & history")
+    mode = st.radio("Show", ("Rotated out", "Departed", "Movement log", "Past reports", "Former names"), horizontal=True)
+    query = st.text_input("Find a governor", placeholder="Name, alias or ID", key="rotation_search")
+    members = [r for r in scored if matches(r, query)]
+    if mode == "Past reports":
+        labels = db.history_labels(scored)
+        if not labels:
+            st.info("The first weekly roster import will start the report archive.")
+            return
+        label = st.selectbox("Saved report", labels)
+        st.caption("Read-only · Blank fields were absent from the saved report.")
+        frame_table(snapshot_rows(members, label), "snapshot")
+    elif mode == "Movement log":
+        events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", [])]
+        frame_table([{"Report date": d, "Governor": name, "Movement": e.get("type"), "Previous rank": e.get("rank")}
+                     for d, name, e in sorted(events, key=lambda item: item[0], reverse=True)], "events",
+                    "No dated roster movements have been recorded for this selection.")
+        legacy = db.DATA_DIR / db.LEGACY_STATE
+        if legacy.exists():
+            historical = json.loads(legacy.read_text(encoding="utf-8-sig")).get("movement_log", [])
+            if historical:
+                with st.expander("Earlier movement log"):
+                    for item in historical:
+                        st.text(f"{item.get('timestamp', '')}   Joined / returned: {', '.join(item.get('joined', [])) or '—'}"
+                                f"   Left: {', '.join(item.get('left', [])) or '—'}")
+    elif mode == "Former names":
+        frame_table([{"Governor": r["name"], "Governor ID": r["id"], "Former names": ", ".join(r["aliases"])}
+                     for r in members if r.get("aliases")], "aliases")
+    else:
+        rows = [r for r in members if not r["in_active_126"] and bool(r.get("in_kvk_4161")) == (mode == "Rotated out")]
+        rows.sort(key=lambda r: (-db.n(r.get("kvk_dkp" if mode == "Rotated out" else "forts_all")), r["id"]))
+        frame_table([{"Governor": r["name"], "Previous rank": db.former_rank(r), "Governor ID": r["id"], "Power": r.get("power"),
+                      "DKP": r.get("kvk_dkp"), "All-time forts": r.get("forts_all")} for r in rows], "memberships")
+
+
+def member_detail(scored, preferred=None):
+    members = {r["id"]: r for r in sorted(scored, key=lambda r: r["name"].casefold())}
+    ids = list(members)
+    if not ids:
+        st.info("Import a roster to review a governor.")
+        return
+    gid = st.selectbox("Governor", ids, index=ids.index(preferred) if preferred in ids else 0,
+                       format_func=lambda key: f'{members[key]["name"]} · {key}', key="officer_governor")
+    rec = members[gid]
+    tag = db.badge(rec, db.utc_day())
+    html(f'<div class="profile"><div class="subhead">{esc(db.bucket_status(rec))}</div>'
+         f'<strong>{esc(rec["name"])} {f"<small class=join-tag>{esc(tag)}</small>" if tag else ""}</strong>'
+         f'<p>Saved rank <b>{esc(rec["held"] or "Unrecorded")}</b> · Previous <b>{esc(db.former_rank(rec) or "Unrecorded")}</b>'
+         f' · Suggested <b>{esc(rec["proposed"] or "—")}</b></p><p>{esc(rec["reason"])}</p></div>')
+    stats([("Overall", f'{rec["overall"]:.1f}', "Score out of 100"), ("Support", f'{rec["support"]:.1f}', "Alliance usefulness"),
+           ("KvK", f'{rec["war"]:.1f}', "War contribution"), ("Power", compact(db.n(rec.get("power"))), "Recorded power")])
+    expected_key = f"seen_officer_{gid}"
+    expected = st.session_state.setdefault(expected_key, db.officer_values(rec))
+    with st.form(f"officer_form_{gid}"):
+        choices = (None, *(db.RANKS if gid not in db.COMMAND else (db.COMMAND[gid][0],)))
+        current = rec.get("officer_rank")
+        a, b = st.columns([1.1, 1])
+        override = a.selectbox("Officer rank override", choices, index=choices.index(current) if current in choices else 0,
+                               format_func=lambda v: v or "Use saved report rank", key=f"override_{gid}")
+        excused = b.checkbox("Excused for rebuild or absence", value=bool(rec.get("is_excused")), key=f"excused_{gid}")
+        note = st.text_area("Officer note", value=rec.get("officer_note") or "", key=f"note_{gid}",
+                            placeholder="Ask about activity and review next report.")
+        submitted = st.form_submit_button("Save officer decision", type="primary")
+    if submitted:
+        try:
+            db.change_records(lambda records: db.save_officer(records, gid, override, note, excused, expected))
+            st.session_state.pop(expected_key, None)
+            st.session_state.notice = f'Saved the officer decision for {rec["name"]}.'
             st.rerun()
+        except (ValueError, OSError, Timeout) as exc:
+            st.error(str(exc))
+            st.caption("Refresh the browser to load the latest officer decision.")
+    with st.expander("Governor report history"):
+        history = sorted(rec.get("history", []), key=lambda h: (db.iso_day(h.get("date")) or db.date.min, str(h.get("date"))))
+        prior = None
+        rows = []
+        for h in history:
+            score = h.get("overall_score")
+            delta = round(score - prior, 1) if score is not None and prior is not None else None
+            rows.append({"Report": h.get("date"), "In ODS1": h.get("in_active"), "Saved rank": h.get("rank"),
+                         "Overall": score, "Change": delta, "Support": h.get("ods1_usefulness"), "KvK": h.get("kvk_score")})
+            prior = score
+        frame_table(list(reversed(rows)), "governor_history")
 
-    with col_disc:
-        st.markdown("#### 📋 Discord / R4 Briefing")
-        briefing_text = build_discord_briefing(df_all, phase_mode)
-        st.code(briefing_text, language="markdown")
+
+def commit_import(batches, full, restore, auto):
+    try:
+        result = db.change_records(lambda records: db.merge_dated_reports(
+            records, batches, full, st.session_state.rules, restore, auto))
+    except db.OlderReports as exc:
+        st.session_state.import_info = str(exc)
+    except (ValueError, OSError, Timeout) as exc:
+        st.session_state.import_error = str(exc)
+    else:
+        st.session_state.import_generation = st.session_state.get("import_generation", 0) + 1
+        st.session_state.notice = result
+
+
+def report_import(scored):
+    generation = st.session_state.get("import_generation", 0)
+    if message := st.session_state.pop("import_error", None):
+        st.error(message)
+    if message := st.session_state.pop("import_info", None):
+        st.info(message)
+    uploads = st.file_uploader("Drop your RokStats exports", type=["xlsx", "xls", "csv", "tsv", "txt"],
+                               accept_multiple_files=True, key=f"rok_upload_{generation}",
+                               help="Excel, CSV or a tab-separated table. You can drop several reports together.")
+    files = [(f.name, f.getvalue()) for f in uploads]
+    with st.expander("Paste a table"):
+        pasted = st.text_area("Paste the headings and rows from Excel or RokStats", key=f"paste_csv_{generation}",
+                              placeholder="Paste here, then press Ctrl+Enter to preview.")
+    if pasted.strip():
+        files.append(("Pasted table.tsv", pasted.encode("utf-8")))
+    paths = db.repository_reports()
+    if paths:
+        with st.expander("Use files already in data/"):
+            chosen = st.multiselect("Available exports", paths, format_func=lambda path: path.name,
+                                    key=f"repo_files_{generation}")
+        try:
+            files.extend((p.name, p.read_bytes()) for p in chosen)
+        except OSError as exc:
+            st.error(f"Could not open the selected repository file. {exc}")
+            return
+    if not files:
+        return
+
+    preview = st.container()
+    action = st.container()
+    options = st.expander("Import options")
+    batches = {}
+    seen = {}
+    weekly_ids = []
+    today = db.utc_day()
+    for idx, (name, data) in enumerate(files):
+        try:
+            frame = db.prepare_file(name, data)
+            guess = db.guess_type(name, frame)
+            if guess is None:
+                raise ValueError(f"{name} needs an activity column such as forts or helps, or a war column such as DKP.")
+            detected_day = db.detect_report_day(name, frame)
+            digest = hashlib.sha256(data).hexdigest()
+            key = f"{generation}_{idx}_{digest[:16]}"
+            with options:
+                if len(files) > 1:
+                    st.text(name)
+                left, right = st.columns(2)
+                kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}")
+                day = right.date_input("Report end date (UTC)", value=detected_day or today, key=f"date_{key}") or detected_day or today
+            if day > today:
+                raise ValueError(f"{name} is dated {day}, which is in the future. Check the date in Import options.")
+            rows = db.report_data(name, frame, kind)
+        except (ValueError, OSError, ImportError) as exc:
+            preview.error(str(exc))
+            return
+
+        slot = (day.isoformat(), kind)
+        if slot in seen:
+            previous_name, previous_digest = seen[slot]
+            if digest == previous_digest:
+                continue
+            preview.error(f"{previous_name} and {name} are both set to {kind} for {day}. "
+                          "Choose one file or correct its type or date in Import options.")
+            return
+        seen[slot] = (name, digest)
+        batches.setdefault(day.isoformat(), []).append((kind, digest, rows))
+        if kind == db.WEEK:
+            weekly_ids.append({r["id"] for r in rows})
+        date_text = day.strftime("%d %b %Y")
+        if detected_day is None and day == today:
+            date_text += " (using today)"
+        if len(files) > 1:
+            preview.text(name)
+        unit = "governor" if len(rows) == 1 else "governors"
+        preview.write(f"**{kind}** · {date_text} · {len(rows):,} {unit}")
+        if kind == db.LIFETIME and db.long_activity_period(name, frame):
+            labels = " ".join([name, *frame.attrs.get("report_metadata", [])])
+            if not db.ALL_TIME_LABEL.search(labels):
+                preview.caption("This export spans more than a week. Import as all-time totals if it covers ODS1’s full history.")
+
+    full = auto = False
+    restore = True
+    if weekly_ids:
+        with options:
+            selection = [(slot, digest) for slot, (_, digest) in seen.items()]
+            option_key = hashlib.sha256(repr((generation, selection)).encode()).hexdigest()[:16]
+            full = st.checkbox("Mark missing governors as having left (complete weekly rosters only)", key=f"full_{option_key}")
+            restore = st.checkbox("Restore the saved rank for returners", value=True, key=f"restore_{option_key}")
+            auto = st.checkbox("Apply suggested ranks on import", key=f"auto_{option_key}")
+        if full and len(weekly_ids) == 1:
+            leaving = sum(bool(r.get("in_active_126")) and r["id"] not in weekly_ids[0] for r in scored)
+            preview.caption(f"{leaving} currently active governors are absent from this weekly file.")
+        elif full:
+            preview.caption("Each weekly file will be treated as a complete roster.")
+    action.button("Import", type="primary", key="run_import", on_click=commit_import, args=(batches, full, restore, auto))
+
+
+def briefing(scored, phase):
+    active = [r for r in scored if r["in_active_126"]]
+    parts = [f"ODS1 • Kingdom 4161 | {phase}", f"Weekly officer review · {len(active)} active governors", ""]
+    for action in db.ACTIONS:
+        names = sorted((r["name"] for r in active if r["action"] == action), key=str.casefold)
+        parts.extend([f"{action} ({len(names)})", ", ".join(names) or "None", ""])
+    return "\n".join(parts).strip()
+
+
+def officer_page(scored, records, preferred):
+    title("Officer desk")
+    mode = st.radio("Tools", ("Governor profile", "Import reports", "Leadership briefing"), horizontal=True, key="officer_mode")
+    if mode == "Governor profile":
+        member_detail(scored, preferred)
+    elif mode == "Import reports":
+        report_import(scored)
+        with st.expander("Download current roster backup"):
+            st.caption("This file includes officer notes and saved ranks. Keep a private copy after each review.")
+            st.download_button("Download ods1_baseline.json", json.dumps(records, ensure_ascii=False, indent=2).encode(),
+                               db.BASELINE, "application/json")
+    else:
+        report = briefing(scored, st.session_state.rules[0])
+        st.code(report, language=None)
+        st.download_button("Download leadership briefing", report, "ods1-leadership-briefing.txt", "text/plain")
+
+
+def main():
+    st.set_page_config(page_title="ODS1 · Alliance command", page_icon="♜", layout="wide", initial_sidebar_state="collapsed")
+    html(CSS)
+    try:
+        records, pending = db.load_live()
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        st.error(f"Could not load the ODS1 roster. {exc}")
+        st.stop()
+    with st.sidebar:
+        st.header("Review settings")
+        phase = st.radio("KvK stage", tuple(db.PHASES), key="phase")
+        w1, w2 = db.PHASES[phase]
+        st.caption(f"Overall score · {w1:.0%} support and {w2:.0%} KvK")
+        with st.expander("Rank cutoffs"):
+            cutoff = st.slider("R3 overall cutoff", 30.0, 75.0, 45.0, 1.0)
+            specialist = st.slider("R3 support specialist", 40.0, 85.0, 55.0, 1.0)
+            st.caption("R3 also qualifies at 75 KvK. R2 starts at 24 overall, 30 support or 40 KvK. R1 starts at 12 overall or 30 lifetime usefulness.")
+    rules = (phase, cutoff, specialist)
+    st.session_state.rules = rules
+    scored = [{**r, **db.classify(r, rules), "held": db.saved_rank(r)} for r in records]
+    latest = db.latest_week(records)
+    label = (db.iso_day(latest).strftime("%d %b %Y") if latest and db.iso_day(latest) else "Saved baseline")
+    html('<div class="mast"><div class="identity"><div class="sigil" aria-hidden="true"><span>O1</span></div><div>'
+         '<div class="overline">Odyssey 1 &nbsp; / &nbsp; Kingdom 4161</div><h1>Alliance command</h1></div></div>'
+         f'<div class="stamp"><small>Roster source</small><strong>{esc(label)}</strong><span>{esc(phase)} · KvK 1</span></div></div>')
+    if "notice" in st.session_state:
+        st.success(st.session_state.pop("notice"))
+    if pending:
+        with st.expander(f"Repository imports needing review ({len(pending)})"):
+            for item in pending:
+                st.write(item)
+    requested = st.query_params.get("governor", "")
+    preferred = int(requested) if re.fullmatch(r"\d{1,18}", str(requested)) else None
+    if preferred and st.session_state.get("opened_governor") != preferred and any(r["id"] == preferred for r in records):
+        st.session_state.section = "Officer desk"
+        st.session_state.officer_mode = "Governor profile"
+        st.session_state.officer_governor = preferred
+        st.session_state.opened_governor = preferred
+    view = st.radio("Command navigation", VIEWS, horizontal=True, label_visibility="collapsed", key="section")
+    if view == "Roster review":
+        review_page(scored)
+    elif view == "Activity":
+        activity_page(scored)
+    elif view == "KvK war":
+        war_page(scored)
+    elif view == "Rotations":
+        rotations_page(scored)
+    else:
+        officer_page(scored, records, preferred)
+
+
+if __name__ == "__main__":
+    main()
