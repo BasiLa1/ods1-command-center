@@ -177,7 +177,7 @@ ACTIVITY_FIELDS = {
     "Helps": ("helps_7d", "helps_all"),
     "Tech donations": ("tech_7d", "tech_all"),
     "Flag hours": ("build_7d", "build_all"),
-    "Activity Points": ("rok_act_7d", None),
+    "Activity Points": ("rok_act_7d", "rok_act_all"),
     "Usefulness": ("rok_use_7d", "rok_use_all"),
     "RSS assistance": ("rss_7d", "rss_all"),
 }

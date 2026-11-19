@@ -47,7 +47,7 @@ WEEK_METRICS = {
 }
 ALL_METRICS = {
     "forts": "forts_all", "tech": "tech_all", "helps": "helps_all", "build": "build_all",
-    "rss": "rss_all", "usefulness": "rok_use_all",
+    "rss": "rss_all", "usefulness": "rok_use_all", "activity": "rok_act_all",
 }
 WAR_METRICS = {
     "dkp": "kvk_dkp", "kp": "kvk_kp", "t4": "kvk_t4", "t5": "kvk_t5",
