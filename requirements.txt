@@ -4,3 +4,4 @@ numpy>=1.26
 openpyxl>=3.1.2
 xlrd>=2.0.1
 filelock>=3.12
+streamlit-aggrid==1.2.1.post2

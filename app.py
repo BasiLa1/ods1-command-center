@@ -6,6 +6,7 @@ from html import escape
 
 import pandas as pd
 import streamlit as st
+from st_aggrid import AgGrid, JsCode
 from filelock import Timeout
 
 import roster as db
@@ -100,10 +101,24 @@ def display_name(rec):
     return f"{rec['name']}  ·  {tag}" if tag else rec["name"]
 
 
-def numbered_rows(frame):
+def numbered_grid(frame, key, height=400, selectable=False, position_label="#"):
     frame = frame.rename(columns={"#": "Export rank"})
-    frame.insert(0, "#", range(1, len(frame) + 1))
-    return frame
+    position = {"headerName": position_label, "colId": "visiblePosition", "pinned": "left",
+                "width": 75, "sortable": False, "filter": False, "lockPosition": True,
+                "valueGetter": JsCode("function(p) { return p.node.rowIndex + 1; }")}
+    options = {
+        "columnDefs": [position, *({"field": field} for field in frame.columns)],
+        "defaultColDef": {"sortable": True, "filter": True, "resizable": True, "width": 150},
+        "onModelUpdated": JsCode("""function(p) {
+            requestAnimationFrame(() => {
+                if (!p.api.isDestroyed()) p.api.refreshCells({columns: ['visiblePosition'], force: true});
+            });
+        }"""),
+    }
+    if selectable:
+        options["rowSelection"] = {"mode": "singleRow", "enableClickSelection": True, "checkboxes": False}
+    return AgGrid(frame, gridOptions=options, key=key, height=height, allow_unsafe_jscode=True,
+                  update_on=["selectionChanged"] if selectable else [])
 
 
 def frame_table(rows, key, empty="No governors match this view."):
@@ -111,9 +126,8 @@ def frame_table(rows, key, empty="No governors match this view."):
         st.info(empty)
         return
     frame = pd.DataFrame(rows)
-    if "Place" not in frame:
-        frame = numbered_rows(frame)
-    st.dataframe(frame, hide_index=True, use_container_width=True, key=key)
+    position_label = "Place" if "Place" in frame else "#"
+    numbered_grid(frame.drop(columns=["Place"], errors="ignore"), key, position_label=position_label)
 
 
 def open_import():
@@ -293,12 +307,12 @@ def overview_page(scored):
         st.info("No governors match this view.")
         return
     st.caption(f"{len(frame):,} current members · Scroll sideways for more stats. Select an ODS1 player to edit their rank, note or excused status.")
-    visible = numbered_rows(frame.reset_index())
+    visible = frame.reset_index()
     table_key = hashlib.sha256(repr((str(st.session_state.data_directory), week, tuple(frame.index))).encode()).hexdigest()[:16]
-    event = st.dataframe(visible, key=f"overview_{table_key}", height=540, hide_index=True,
-                         use_container_width=True, on_select="rerun", selection_mode="single-row")
-    if event.selection.rows and event.selection.rows[0] < len(visible):
-        gid = int(visible.iloc[event.selection.rows[0]]["Governor ID"])
+    result = numbered_grid(visible, f"overview_{table_key}", height=540, selectable=True)
+    selected = result.selected_rows
+    if selected is not None and not selected.empty:
+        gid = int(selected.iloc[0]["Governor ID"])
         member_detail([active[gid]], gid, selected=active[gid])
 
 
@@ -413,7 +427,7 @@ def rotations_page(scored):
             term = query.strip().casefold()
             frame = frame.loc[[gid for gid, player in names.items() if term in f"{player} {gid}".casefold()]]
         st.caption(f"{len(frame):,} of {total:,} governors · Dates and times identify individual exports.")
-        st.dataframe(numbered_rows(frame.reset_index()), hide_index=True, height=520, use_container_width=True)
+        numbered_grid(frame.reset_index(), f"archive_{name}", height=520)
     elif mode == "Movement log":
         events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", []) if e.get("type") != "First seen"]
         frame_table([{"Report date": d, "Governor": name, "Movement": e.get("type"), "Previous rank": e.get("rank")}
