@@ -726,7 +726,21 @@ def load_live(directory=DATA_DIR):
             digest = hashlib.sha256(data).hexdigest()
             partial_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, False)).encode()).hexdigest()
             upgrade_partial = complete and any(r.get("source_fingerprints", {}).get(WEEK) == partial_fingerprint for r in records)
-            if latest > day.isoformat() or (latest == day.isoformat() and not upgrade_partial):
+            upgrade_ranks = False
+            if latest == day.isoformat() and complete and "rank" in frame and path.suffix.lower() == ".csv":
+                # Recognize a previously imported copy of this exact report before ranks were supplied.
+                source = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
+                rank_headers = [c for c in source.fieldnames if COLUMN_NAMES.get(normalized_heading(c)) == "rank"]
+                stripped = io.StringIO()
+                writer = csv.DictWriter(stripped, [c for c in source.fieldnames if c not in rank_headers],
+                                        extrasaction="ignore", lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(source)
+                old_digest = hashlib.sha256(stripped.getvalue().encode()).hexdigest()
+                old_fingerprints = {hashlib.sha256(repr((day.isoformat(), old_digest, full)).encode()).hexdigest()
+                                    for full in (False, True)}
+                upgrade_ranks = any(r.get("source_fingerprints", {}).get(WEEK) in old_fingerprints for r in records)
+            if latest > day.isoformat() or (latest == day.isoformat() and not (upgrade_partial or upgrade_ranks)):
                 continue
             rows = report_data(path.name, frame, kind)
             scheduled.setdefault(day.isoformat(), []).append((kind, digest, rows))
