@@ -20,6 +20,13 @@ from xlrd.biffh import XLRDError
 
 REPO_DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR = Path(os.environ.get("ODS1_DATA_DIR") or REPO_DATA_DIR).expanduser()
+# The confirmed 04:08 roster supersedes both published versions of the 03:14 report.
+SUPERSEDED_WEEKLY_DIGESTS = {
+    "f88635bba9e7169b859f1031aab9120aec62702960a569c71285adb3e1db3cea": (
+        "356af0014b592690517b41af9a08332609bea94a7dfd0d4a97a3b69a0567f003",
+        "c1c59d7b4a2fd6aed403397a452d744bea03abec4f0060eca8c556539685fd3b",
+    ),
+}
 BASELINE = "ods1_baseline.json"
 CLEAN_DATA_DIR = DATA_DIR / "clean-reports"
 LEGACY_STATE = "ods1_persistent_state.json"
@@ -701,6 +708,7 @@ def load_live(directory=DATA_DIR):
     pending = []
     scheduled = {}
     complete_days = set()
+    saved_war_reports = {}
     for path in repository_reports(directory):
         try:
             data = path.read_bytes()
@@ -737,9 +745,14 @@ def load_live(directory=DATA_DIR):
                 writer.writeheader()
                 writer.writerows(source)
                 old_digest = hashlib.sha256(stripped.getvalue().encode()).hexdigest()
-                old_fingerprints = {hashlib.sha256(repr((day.isoformat(), old_digest, full)).encode()).hexdigest()
+                old_fingerprints = {hashlib.sha256(repr((day.isoformat(), prior_digest, full)).encode()).hexdigest()
+                                    for prior_digest in (old_digest, *SUPERSEDED_WEEKLY_DIGESTS.get(digest, ()))
                                     for full in (False, True)}
                 upgrade_ranks = any(r.get("source_fingerprints", {}).get(WEEK) in old_fingerprints for r in records)
+            if kind == WAR and latest == day.isoformat():
+                war_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, None)).encode()).hexdigest()
+                if any(r.get("source_fingerprints", {}).get(WAR) == war_fingerprint for r in records):
+                    saved_war_reports[day.isoformat()] = (path.name, digest, frame)
             if latest > day.isoformat() or (latest == day.isoformat() and not (upgrade_partial or upgrade_ranks)):
                 continue
             rows = report_data(path.name, frame, kind)
@@ -752,6 +765,12 @@ def load_live(directory=DATA_DIR):
         try:
             # Missing members only leave when an officer confirms a complete roster.
             updated = copy.deepcopy(records)
+            if label in complete_days and label in saved_war_reports and not any(kind == WAR for kind, _, _ in batch):
+                # Match the same KvK report again after correcting the membership for that day.
+                name, digest, frame = saved_war_reports[label]
+                batch = [*batch, (WAR, digest, report_data(name, frame, WAR))]
+                for rec in updated:
+                    rec.get("source_fingerprints", {}).pop(WAR, None)
             merge_reports(updated, batch, label, complete=label in complete_days)
             records = updated
         except ValueError as exc:
