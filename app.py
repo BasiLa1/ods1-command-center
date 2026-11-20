@@ -192,8 +192,7 @@ ACTIVITY_FIELDS = {
 }
 
 
-def activity_members(records, key):
-    period = st.radio("Period", ("Weekly", "All-time"), horizontal=True, key=f"{key}_period")
+def activity_members(records, key, period):
     if period == "All-time":
         return 1, [(display_name(record), record["id"], record) for record in records]
     weeks = db.history_labels(records)
@@ -305,7 +304,8 @@ def overview_page(scored):
 
 def activity_page(scored):
     title("Alliance activity")
-    period, members = activity_members(scored, "activity")
+    period = st.radio("Period", ("Weekly", "All-time"), horizontal=True, key="activity_period")
+    period, members = activity_members(scored, "activity", period)
     query = st.text_input("Find a governor", placeholder="Name or Governor ID", key="activity_search")
     fields = {label: columns[period] for label, columns in ACTIVITY_FIELDS.items() if columns[period]}
     frame_table([
@@ -317,7 +317,26 @@ def activity_page(scored):
 
 def leaderboards_page(scored):
     title("Leaderboards")
-    period, members = activity_members(scored, "leaderboards")
+    period = st.radio("Leaderboard", ("Weekly", "All-time", "KvK performance"), horizontal=True, key="leaderboards_period")
+    if period == "KvK performance":
+        active = [r for r in scored if r.get("in_active_126")]
+        fighters = [r for r in active if r.get("in_kvk_4161")]
+        fields = {"KvK score / 100": "war", "DKP": "kvk_dkp", "Kill points": "kvk_kp",
+                  "T4 kills": "kvk_t4", "T5 kills": "kvk_t5", "Dead": "kvk_dead",
+                  "Healed": "kvk_healed", "Acclaim": "kvk_acclaim"}
+        metric = st.selectbox("Rank by", list(fields), key="kvk_leaderboard_metric")
+        field = fields[metric]
+        ranked = sorted((r for r in fighters if r.get(field) is not None),
+                        key=lambda r: (-db.n(r[field]), -db.n(r.get("kvk_dkp")), r["id"]))
+        st.caption(f"{len(fighters)} of {len(active)} current members matched to KvK records · Ties sorted by DKP, then Governor ID.")
+        frame_table([
+            {"Place": place, "Governor": r["name"], metric: r[field],
+             **{label: r.get(column) for label, column in fields.items() if column != field},
+             "Governor ID": r["id"]}
+            for place, r in enumerate(ranked, 1)
+        ], "kvk_leaderboard", empty=f"No current members have a recorded value for {metric}.")
+        return
+    period, members = activity_members(scored, "leaderboards", period)
     metrics = [name for name, fields in ACTIVITY_FIELDS.items() if fields[period]]
     metric = st.selectbox("Stat", metrics, key="leaderboard_stat")
     field = ACTIVITY_FIELDS[metric][period]
