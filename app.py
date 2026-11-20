@@ -97,7 +97,7 @@ def matches(rec, query):
 
 
 def display_name(rec):
-    tag = db.badge(rec, db.utc_day())
+    tag = db.badge(rec, db.report_today())
     return f"{rec['name']}  ·  {tag}" if tag else rec["name"]
 
 
@@ -167,7 +167,7 @@ def review_page(scored):
     start = (page - 1) * 15
     rows = []
     for number, rec in enumerate(selected[start:start + 15], start=start + 1):
-        joined = db.badge(rec, db.utc_day())
+        joined = db.badge(rec, db.report_today())
         tag = f'<span class="join-tag">{esc(joined)}</span>' if joined else ""
         decision = rec["action"]
         decision_label = f'Suggest {rec["proposed"]}' if decision == "Review suggested rank" else SHORT_ACTION.get(decision, decision)
@@ -411,11 +411,15 @@ def rotations_page(scored):
         if directory == db.DATA_DIR:
             folders.insert(0, db.REPO_DATA_DIR / "archive")
         paths = {path.name: path for folder in folders for path in folder.glob("*.csv")}
+        paths.update({p.name: p for p in db.repository_reports(directory)
+                      if p.suffix.lower() == ".csv" and p.name.startswith(("ODS1-", "Kingdom-4161-KvK-"))
+                      and db.report_date_in_name(p.name)})
         if not paths:
             st.info("No historical exports in this data set.")
             return
-        name = st.selectbox("Historical export", sorted(paths, reverse=True),
-                            format_func=lambda n: n[:-4].replace("_", " · "))
+        ordered = sorted(paths, key=lambda n: (db.report_date_in_name(n) or db.date.min, n), reverse=True)
+        name = st.selectbox("Historical export", ordered, format_func=lambda n: n[:-4]
+                            .replace("-complete-weekly-", "-weekly-").replace("_to_", " to ").replace("_", " · "))
         path = paths[name]
         info = path.stat()
         frame = overview_export(path, info.st_mtime_ns, info.st_size)
@@ -460,7 +464,7 @@ def member_detail(scored, preferred=None, selected=None):
     gid = selected["id"] if selected else st.selectbox("Governor", ids, index=ids.index(preferred) if preferred in ids else 0,
                        format_func=lambda key: f'{members[key]["name"]} · {key}', key="officer_governor")
     rec = members[gid]
-    tag = db.badge(rec, db.utc_day())
+    tag = db.badge(rec, db.report_today())
     html(f'<div class="profile"><div class="subhead">{esc(db.bucket_status(rec))}</div>'
          f'<strong>{esc(rec["name"])} {f"<small class=join-tag>{esc(tag)}</small>" if tag else ""}</strong>'
          f'<p>Saved rank <b>{esc(rec["held"] or "Unrecorded")}</b> · Previous <b>{esc(db.former_rank(rec) or "Unrecorded")}</b>'
@@ -556,7 +560,8 @@ def report_import(scored):
     action = st.container()
     options = st.expander("Import options")
     batches = {}
-    seen = {}
+    grouped = {}
+    using_today = set()
     weekly_ids = []
     today = db.report_today()
     for idx, (name, data) in enumerate(files):
@@ -582,34 +587,36 @@ def report_import(scored):
             return
 
         slot = (day.isoformat(), kind)
-        if slot in seen:
-            previous_name, previous_digest = seen[slot]
-            if digest == previous_digest:
-                continue
-            preview.error(f"{previous_name} and {name} are both set to {kind} for {day}. "
-                          "Choose one file or correct its type or date in Import options.")
-            return
-        seen[slot] = (name, digest)
-        batches.setdefault(day.isoformat(), []).append((kind, digest, rows))
-        if kind == db.WEEK:
-            weekly_ids.append({r["id"] for r in rows})
-        date_text = day.strftime("%d %b %Y")
+        grouped.setdefault(slot, {}).setdefault(digest, (name, rows))
         if detected_day is None and day == today:
-            date_text += " (using today)"
-        if len(files) > 1:
-            preview.text(name)
-        unit = "governor" if len(rows) == 1 else "governors"
-        preview.write(f"**{kind}** · {date_text} · {len(rows):,} {unit}")
+            using_today.add(slot)
         if kind == db.LIFETIME and db.long_activity_period(name, frame):
             labels = " ".join([name, *frame.attrs.get("report_metadata", [])])
             if not db.ALL_TIME_LABEL.search(labels):
                 preview.caption("This export spans more than a week. Import as all-time totals if it covers ODS1’s full history.")
 
+    for (end, kind), parts in grouped.items():
+        try:
+            digest, rows = db.combine_report_files(kind, parts)
+        except ValueError as exc:
+            preview.error(str(exc))
+            return
+        batches.setdefault(end, []).append((kind, digest, rows))
+        if kind == db.WEEK:
+            weekly_ids.append({r["id"] for r in rows})
+        date_text = db.iso_day(end).strftime("%d %b %Y")
+        if (end, kind) in using_today:
+            date_text += " (using today)"
+        unit = "governor" if len(rows) == 1 else "governors"
+        preview.write(f"**{kind}** · {date_text} · {len(rows):,} {unit}")
+        if len(parts) == 2:
+            preview.caption("Basic and Advanced matched by Governor ID.")
+
     full = auto = False
     restore = True
     if weekly_ids:
         with options:
-            selection = [(slot, digest) for slot, (_, digest) in seen.items()]
+            selection = sorted((slot, sorted(parts)) for slot, parts in grouped.items())
             option_key = hashlib.sha256(repr((generation, selection)).encode()).hexdigest()[:16]
             full = st.checkbox("Mark missing governors as having left (complete weekly rosters only)", key=f"full_{option_key}")
             restore = st.checkbox("Restore the saved rank for returners", value=True, key=f"restore_{option_key}")

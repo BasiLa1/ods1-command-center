@@ -454,16 +454,65 @@ def report_data(name, data, kind):
     return frame.astype(object).where(frame.notna(), None).to_dict("records")
 
 
-def apply_identity(rec, row):
+def combine_report_files(kind, files):
+    """Combine the two RokStats activity views after validating their shared rows."""
+    if len(files) == 1:
+        digest, (_, rows) = next(iter(files.items()))
+        return digest, rows
+
+    names = " and ".join(name for name, _ in files.values())
+    mismatch = f"{names} share a date and report type. Check the periods in Import options or choose one export."
+    if kind not in (WEEK, LIFETIME) or len(files) != 2:
+        raise ValueError(mismatch)
+    first, second = (rows for _, rows in files.values())
+    basic, advanced = (first, second) if "usefulness" in first[0] else (second, first)
+    if ("usefulness" not in basic[0] or "activity" in basic[0]
+            or "activity" not in advanced[0] or "usefulness" in advanced[0]):
+        raise ValueError(mismatch)
+
+    advanced_by_id = {row["id"]: row for row in advanced}
+    if {row["id"] for row in basic} != advanced_by_id.keys():
+        raise ValueError(f"{names} cover different Governor IDs. Check the periods in Import options.")
+    # The # column ranks usefulness in Basic and activity points in Advanced.
+    shared = (basic[0].keys() & advanced[0].keys()) - {"camp rank"}
+    shared_metrics = shared.intersection(WEEK_METRICS)
+    matched_activity = False
+    combined = []
+    for row in basic:
+        other = advanced_by_id[row["id"]]
+        for field in shared:
+            left, right = row[field], other[field]
+            if left is None or right is None:
+                continue
+            if left != right and str(left).strip() != str(right).strip():
+                raise ValueError(f"{names} disagree on {field} for Governor ID {row['id']}. Check the periods in Import options.")
+            if field in shared_metrics:
+                matched_activity = True
+        merged = {**row, **{field: value for field, value in other.items() if value is not None}}
+        merged.pop("camp rank", None)
+        combined.append(merged)
+    if not matched_activity:
+        raise ValueError(mismatch)
+    digest = hashlib.sha256("|".join(sorted(files)).encode()).hexdigest()
+    return digest, combined
+
+
+def apply_identity(rec, row, *, keep_current_name=False):
     if not row.get("name"):
         return
     new_name = str(row["name"]).strip()
     if new_name and new_name != rec.get("name"):
         aliases = set(rec.get("aliases") or [])
-        if rec.get("name"):
-            aliases.add(rec["name"])
-        aliases.discard(new_name)
-        rec.update(name=new_name, aliases=sorted(aliases))
+        current = rec.get("name")
+        known_name = bool(current and current != f"Governor {rec['id']}")
+        if keep_current_name and known_name:
+            aliases.add(new_name)
+        else:
+            if known_name:
+                aliases.add(current)
+            rec["name"] = new_name
+        aliases.discard(rec["name"])
+        rec["aliases"] = sorted(aliases)
 
 
 def bucket_status(rec):
@@ -553,7 +602,12 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                 records.append(by_id[gid])
             rec = by_id[gid]
             touched.add(gid)
-            apply_identity(rec, row)
+            # An older spelling can persist in kingdom or all-time exports.
+            name_day = rec.get("roster_name_date", rec.get("last_weekly_report") or "")
+            if kind == WEEK:
+                rec["roster_name_date"] = report_day if row.get("name") else name_day
+            roster_name_is_current = kind != WEEK and rec.get("in_active_126") and name_day >= report_day
+            apply_identity(rec, row, keep_current_name=roster_name_is_current)
             if kind == WEEK:
                 for field in WEEK_METRICS.values():
                     rec.pop(field, None)
