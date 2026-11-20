@@ -100,12 +100,19 @@ def display_name(rec):
     return f"{rec['name']}  ·  {tag}" if tag else rec["name"]
 
 
+def numbered_rows(frame):
+    frame = frame.rename(columns={"#": "Export rank"})
+    frame.insert(0, "#", range(1, len(frame) + 1))
+    return frame
+
+
 def frame_table(rows, key, empty="No governors match this view."):
     if not rows:
         st.info(empty)
         return
     frame = pd.DataFrame(rows)
-    frame.insert(0, "#", range(1, len(frame) + 1))
+    if "Place" not in frame:
+        frame = numbered_rows(frame)
     st.dataframe(frame, hide_index=True, use_container_width=True, key=key)
 
 
@@ -287,7 +294,7 @@ def overview_page(scored):
         st.info("No governors match this view.")
         return
     st.caption(f"{len(frame):,} current members · Scroll sideways for more stats. Select an ODS1 player to edit their rank, note or excused status.")
-    visible = frame.reset_index()
+    visible = numbered_rows(frame.reset_index())
     table_key = hashlib.sha256(repr((str(st.session_state.data_directory), week, tuple(frame.index))).encode()).hexdigest()[:16]
     event = st.dataframe(visible, key=f"overview_{table_key}", height=540, hide_index=True,
                          use_container_width=True, on_select="rerun", selection_mode="single-row")
@@ -387,7 +394,7 @@ def rotations_page(scored):
             term = query.strip().casefold()
             frame = frame.loc[[gid for gid, player in names.items() if term in f"{player} {gid}".casefold()]]
         st.caption(f"{len(frame):,} of {total:,} governors · Dates and times identify individual exports.")
-        st.dataframe(frame.reset_index(), hide_index=True, height=520, use_container_width=True)
+        st.dataframe(numbered_rows(frame.reset_index()), hide_index=True, height=520, use_container_width=True)
     elif mode == "Movement log":
         events = [(e.get("date", ""), r["name"], e) for r in members for e in r.get("membership_events", []) if e.get("type") != "First seen"]
         frame_table([{"Report date": d, "Governor": name, "Movement": e.get("type"), "Previous rank": e.get("rank")}
