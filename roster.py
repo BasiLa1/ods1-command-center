@@ -30,6 +30,8 @@ DEFAULT_RULES = ("Early KvK", 45.0, 55.0)
 COMMAND_AS_OF = "2026-11-20"
 COMMAND = {
     233428447: ("R5", "Leader"),
+    233185199: ("R4", "Officer"),
+    233183034: ("R4", "Officer"),
     233183312: ("R4", "Officer"),
     233183356: ("R4", "Officer"),
     232674847: ("R4", "Officer"),
