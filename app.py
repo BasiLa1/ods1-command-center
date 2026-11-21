@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 from html import escape
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -10,6 +11,7 @@ from st_aggrid import AgGrid, JsCode
 from filelock import Timeout
 
 import roster as db
+import membership
 
 
 VIEWS = ("Roster review", "Overview", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
@@ -136,16 +138,26 @@ def open_import():
 
 
 def review_page(scored):
-    active = [r for r in scored if r["in_active_126"]]
+    active = [r for r in scored if db.is_member(r)]
     counts = {action: sum(r["action"] == action for r in active) for action in db.ACTIONS}
-    stats([("Active roster", len(active), "In the saved ODS1 roster"),
+    scanned = any(r.get("membership_date") for r in scored)
+    without_leader = sum(r.get("roster_rank") != "R5" for r in active)
+    roster_detail = f"{without_leader} excluding the alliance leader" if scanned else "Latest weekly report"
+    stats([("Active roster" if scanned else "Report participants", len(active), roster_detail),
            ("Rank suggestions", counts["Promote"] + counts["Demote"] + counts["Review suggested rank"], f'{counts["Promote"]} promote · {counts["Demote"]} demote · {counts["Review suggested rank"]} to review'),
            ("Check-ins", counts["Monitor / warn"], "Monitor / warn queue"),
            ("Kick review", counts["Kick"], "Officer decision required")])
     heading, upload = st.columns([4, 1])
     with heading:
-        title("Weekly review", f"{len(active)} active governors")
+        title("Weekly review", f"{len(active)} {'current members' if scanned else 'report participants'}")
     upload.button("Import reports", type="primary", on_click=open_import, key="open_import", use_container_width=True)
+    week = db.latest_week(scored)
+    if scanned and week:
+        participants = {r["id"] for r in scored for h in r.get("history", [])
+                        if h.get("date") == week and h.get("in_active")}
+        matched = sum(r["id"] in participants for r in active)
+        st.caption(f"{matched} of {len(active)} current members appear in the {db.iso_day(week):%b %d} activity report "
+                   f"({len(participants)} governors in total).")
     a, b, c, d = st.columns([2.1, 1.3, 1, 1])
     query = a.text_input("Find a governor", placeholder="Name, alias or Governor ID", key="review_search")
     action = b.selectbox("Decision", ("All decisions", *db.ACTIONS), key="action_filter")
@@ -171,10 +183,11 @@ def review_page(scored):
         tag = f'<span class="join-tag">{esc(joined)}</span>' if joined else ""
         decision = rec["action"]
         decision_label = f'Suggest {rec["proposed"]}' if decision == "Review suggested rank" else SHORT_ACTION.get(decision, decision)
+        score = f'{rec["overall"]:.1f}' if rec.get("has_weekly_activity", True) else "—"
         rows.append(f'<tr><td class="pos">{number}.</td><td><a target="_self" href="?governor={int(rec["id"])}">{esc(rec["name"])}</a>{tag}</td>'
                     f'<td class="rank-pair">{esc(rec["held"] or "—")}<i>→</i>{esc(rec["proposed"] or "—")}</td>'
                     f'<td><span class="chip {ACTION_STYLE[decision]}">{esc(decision_label)}</span></td>'
-                    f'<td class="score score-col">{rec["overall"]:.1f}</td><td class="reason reason-col">{esc(rec["reason"])}</td></tr>')
+                    f'<td class="score score-col">{score}</td><td class="reason reason-col">{esc(rec["reason"])}</td></tr>')
     html('<div class="council-wrap"><table class="council"><thead><tr><th class="pos">#</th><th>Governor</th>'
          '<th>Saved → suggested</th><th>Decision</th><th class="score-col">Overall</th><th class="reason-col">Reason</th>'
          '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
@@ -189,7 +202,9 @@ def review_page(scored):
             st.rerun()
     csv_rows = [{"#": idx, "Governor ID": r["id"], "Governor": r["name"], "Saved rank": r["held"],
                  "Suggested rank": r["proposed"], "Decision": r["action"], "Reason": r["reason"],
-                 "Overall": r["overall"], "Support": r["support"], "KvK": r["war"], "Officer note": r.get("officer_note", "")}
+                 "Overall": r["overall"] if r.get("has_weekly_activity", True) else None,
+                 "Support": r["support"] if r.get("has_weekly_activity", True) else None,
+                 "KvK": r["war"], "Officer note": r.get("officer_note", "")}
                 for idx, r in enumerate(selected, start=1)]
     st.download_button("Download filtered review", pd.DataFrame(csv_rows).to_csv(index=False).encode("utf-8-sig"),
                        "ods1-roster-review.csv", "text/csv")
@@ -207,9 +222,11 @@ ACTIVITY_FIELDS = {
 
 
 def activity_members(records, key, period):
+    weeks = db.history_labels(records)
+    if key == "leaderboards" or st.checkbox("Current ODS1 members only", value=True, key="activity_current_only"):
+        records = [r for r in records if db.is_member(r)]
     if period == "All-time":
         return 1, [(display_name(record), record["id"], record) for record in records]
-    weeks = db.history_labels(records)
     if not weeks:
         st.info("Import a weekly RokStats report to see that week's activity.")
         return 0, []
@@ -244,7 +261,7 @@ def overview_export(path, modified, size):
 
 def overview_page(scored):
     title("Active roster overview")
-    active = {r["id"]: r for r in scored if r.get("in_active_126")}
+    active = {r["id"]: r for r in scored if db.is_member(r)}
     if not active:
         st.info("No current members in this roster.")
         return
@@ -256,8 +273,9 @@ def overview_page(scored):
     for r in active.values():
         snapshot = next((h for h in r.get("history", []) if h.get("date") == week and h.get("in_active")), {})
         row = {"Governor ID": r["id"], "Governor": r["name"],
-               "Saved rank": r["held"], "Suggested rank": r["proposed"], "Decision": r["action"],
-               "Power": r.get("power"), "Overall": r["overall"], "Support": r["support"], "KvK score": r["war"],
+               "RokStats rank": r.get("roster_rank"), "Saved rank": r["held"], "Suggested rank": r["proposed"], "Decision": r["action"],
+               "Power": r.get("power"), "Overall": r["overall"] if r.get("has_weekly_activity", True) else None,
+               "Support": r["support"] if r.get("has_weekly_activity", True) else None, "KvK score": r["war"],
                "Officer note": r.get("officer_note"), "Excused": bool(r.get("is_excused"))}
         for metric, (weekly, lifetime) in ACTIVITY_FIELDS.items():
             row[f"Weekly · {metric}"] = activity_value(snapshot, weekly)
@@ -333,7 +351,7 @@ def leaderboards_page(scored):
     title("Leaderboards")
     period = st.radio("Leaderboard", ("Weekly", "All-time", "KvK performance"), horizontal=True, key="leaderboards_period")
     if period == "KvK performance":
-        active = [r for r in scored if r.get("in_active_126")]
+        active = [r for r in scored if db.is_member(r)]
         fighters = [r for r in active if r.get("in_kvk_4161")]
         fields = {"KvK score / 100": "war", "DKP": "kvk_dkp", "Kill points": "kvk_kp",
                   "T4 kills": "kvk_t4", "T5 kills": "kvk_t5", "Dead": "kvk_dead",
@@ -365,10 +383,10 @@ def leaderboards_page(scored):
 
 
 def war_page(scored):
-    fighters = [r for r in scored if r.get("in_kvk_4161")]
+    fighters = [r for r in scored if db.is_member(r) and r.get("in_kvk_4161")]
     title("KvK war", "Kingdom 4161")
-    stats([("Tracked fighters", len(fighters), "ODS1-linked governor IDs"),
-           ("Combined DKP", compact(sum(db.n(r.get("kvk_dkp")) for r in fighters)), "Active and rotated members"),
+    stats([("Tracked fighters", len(fighters), "Current ODS1 members"),
+           ("Combined DKP", compact(sum(db.n(r.get("kvk_dkp")) for r in fighters)), "Current members in the KvK report"),
            ("Kill points", compact(sum(db.n(r.get("kvk_kp")) for r in fighters)), "Recorded in the KvK export"),
            ("Troops healed", compact(sum(db.n(r.get("kvk_healed")) for r in fighters)), "Recorded in the KvK export")])
     query = st.text_input("Find a fighter", placeholder="Name, alias or ID", key="war_search")
@@ -385,11 +403,11 @@ def snapshot_rows(records, label):
         if entry is None:
             continue
         rows.append({"Governor": entry.get("name") or f'ID {rec["id"]}', "Governor ID": rec["id"],
-                     "In ODS1": bool(entry.get("in_active")), "Saved rank": entry.get("rank"),
+                     "In weekly report": bool(entry.get("in_active")), "Saved rank": entry.get("rank"),
                      "Prior rank": entry.get("last_active_rank"), "Overall": entry.get("overall_score"),
                      "Support": entry.get("ods1_usefulness"), "KvK": entry.get("kvk_score"), "Forts": entry.get("forts_7d"),
                      "Tech points": entry.get("tech_7d"), "DKP": entry.get("kvk_dkp")})
-    return sorted(rows, key=lambda r: (not r["In ODS1"], -(r["Overall"] if r["Overall"] is not None else -1), r["Governor ID"]))
+    return sorted(rows, key=lambda r: (not r["In weekly report"], -(r["Overall"] if r["Overall"] is not None else -1), r["Governor ID"]))
 
 
 def rotations_page(scored):
@@ -425,7 +443,7 @@ def rotations_page(scored):
         frame = overview_export(path, info.st_mtime_ns, info.st_size)
         total = len(frame)
         if st.checkbox("Current ODS1 members only", value=True):
-            frame = frame.loc[frame.index.isin(r["id"] for r in scored if r.get("in_active_126"))]
+            frame = frame.loc[frame.index.isin(r["id"] for r in scored if db.is_member(r))]
         if query.strip():
             names = frame["Player"] if "Player" in frame else frame["Governor Name"]
             term = query.strip().casefold()
@@ -449,7 +467,7 @@ def rotations_page(scored):
         frame_table([{"Governor": r["name"], "Governor ID": r["id"], "Former names": ", ".join(r["aliases"])}
                      for r in members if r.get("aliases")], "aliases")
     else:
-        rows = [r for r in members if not r["in_active_126"] and bool(r.get("in_kvk_4161")) == (mode == "Rotated out")]
+        rows = [r for r in members if not db.is_member(r) and bool(r.get("in_kvk_4161")) == (mode == "Rotated out")]
         rows.sort(key=lambda r: (-db.n(r.get("kvk_dkp" if mode == "Rotated out" else "forts_all")), r["id"]))
         frame_table([{"Governor": r["name"], "Previous rank": db.former_rank(r), "Governor ID": r["id"], "Power": r.get("power"),
                       "DKP": r.get("kvk_dkp"), "All-time forts": r.get("forts_all")} for r in rows], "memberships")
@@ -465,11 +483,14 @@ def member_detail(scored, preferred=None, selected=None):
                        format_func=lambda key: f'{members[key]["name"]} · {key}', key="officer_governor")
     rec = members[gid]
     tag = db.badge(rec, db.report_today())
+    observed = f' · RokStats <b>{esc(rec["roster_rank"])}</b>' if rec.get("roster_rank") else ""
     html(f'<div class="profile"><div class="subhead">{esc(db.bucket_status(rec))}</div>'
          f'<strong>{esc(rec["name"])} {f"<small class=join-tag>{esc(tag)}</small>" if tag else ""}</strong>'
-         f'<p>Saved rank <b>{esc(rec["held"] or "Unrecorded")}</b> · Previous <b>{esc(db.former_rank(rec) or "Unrecorded")}</b>'
+         f'<p>Saved rank <b>{esc(rec["held"] or "Unrecorded")}</b>{observed} · Previous <b>{esc(db.former_rank(rec) or "Unrecorded")}</b>'
          f' · Suggested <b>{esc(rec["proposed"] or "—")}</b></p><p>{esc(rec["reason"])}</p></div>')
-    stats([("Overall", f'{rec["overall"]:.1f}', "Score out of 100"), ("Support", f'{rec["support"]:.1f}', "Alliance usefulness"),
+    has_week = rec.get("has_weekly_activity", True)
+    stats([("Overall", f'{rec["overall"]:.1f}' if has_week else "—", "Score out of 100"),
+           ("Support", f'{rec["support"]:.1f}' if has_week else "—", "Alliance usefulness"),
            ("KvK", f'{rec["war"]:.1f}', "War contribution"), ("Power", compact(db.n(rec.get("power"))), "Recorded power")])
     report_days = [day for h in rec.get("history", []) if h.get("in_active")
                    and (day := db.iso_day(h.get("date")))]
@@ -480,7 +501,7 @@ def member_detail(scored, preferred=None, selected=None):
     expected_key = f"seen_officer_{gid}"
     expected = st.session_state.setdefault(expected_key, db.officer_values(rec))
     with st.form(f"officer_form_{gid}"):
-        choices = (None, *(db.RANKS if gid not in db.COMMAND else (db.COMMAND[gid][0],)))
+        choices = (None, *(db.RANKS if rec.get("roster_rank") or gid not in db.COMMAND else (db.COMMAND[gid][0],)))
         current = rec.get("officer_rank")
         a, b = st.columns([1.1, 1])
         override = a.selectbox("Officer rank override", choices, index=choices.index(current) if current in choices else 0,
@@ -491,7 +512,7 @@ def member_detail(scored, preferred=None, selected=None):
         submitted = st.form_submit_button("Save officer decision", type="primary")
     if submitted:
         try:
-            db.change_records(lambda records: db.save_officer(records, gid, override, note, excused, expected),
+            db.change_records(lambda records: db.save_officer(records, gid, override, note, excused, expected, scanned_rank=rec.get("roster_rank")),
                               directory=st.session_state.data_directory)
             st.session_state.pop(expected_key, None)
             st.session_state.notice = f'Saved the officer decision for {rec["name"]}.'
@@ -506,24 +527,29 @@ def member_detail(scored, preferred=None, selected=None):
         for h in history:
             score = h.get("overall_score")
             delta = round(score - prior, 1) if score is not None and prior is not None else None
-            rows.append({"Report": h.get("date"), "In ODS1": h.get("in_active"), "Saved rank": h.get("rank"),
+            rows.append({"Report": h.get("date"), "In weekly report": h.get("in_active"), "Saved rank": h.get("rank"),
                          "Overall": score, "Change": delta, "Support": h.get("ods1_usefulness"), "KvK": h.get("kvk_score")})
             prior = score
         frame_table(list(reversed(rows)), "governor_history")
 
 
-def commit_import(batches, full, restore, auto):
+def commit_import(batches, full, restore, auto, member_scan=None):
+    messages = []
     try:
-        result = db.change_records(lambda records: db.merge_dated_reports(
-            records, batches, full, st.session_state.rules, restore, auto),
-            directory=st.session_state.data_directory)
+        directory = st.session_state.data_directory
+        if member_scan is not None:
+            messages.append(membership.save(member_scan, *db.membership_folders(directory)))
+        if batches:
+            messages.append(db.change_records(lambda records: db.merge_dated_reports(
+                records, batches, full, st.session_state.rules, restore, auto), directory=directory))
     except db.OlderReports as exc:
         st.session_state.import_info = str(exc)
     except (ValueError, OSError, Timeout) as exc:
         st.session_state.import_error = str(exc)
     else:
         st.session_state.import_generation = st.session_state.get("import_generation", 0) + 1
-        st.session_state.notice = result
+    if messages:
+        st.session_state.notice = "  \n".join(messages)
 
 
 def report_import(scored):
@@ -538,6 +564,11 @@ def report_import(scored):
                                accept_multiple_files=True, key=f"rok_upload_{generation}",
                                help="Excel, CSV or a tab-separated table. You can drop several reports together.")
     files = [(f.name, f.getvalue()) for f in uploads]
+    with st.expander("Scan current members"):
+        st.write("Add the scanner bookmark to your browser once. On the ODS1 Members page, click the bookmark and drop its CSV above.")
+        st.download_button("Download bookmark setup", Path(__file__).with_name("roster-scanner.html").read_bytes(),
+                           "ODS1-roster-scanner.html", "text/html")
+        st.link_button("Open ODS1 Members", membership.MEMBERS_URL)
     with st.expander("Paste a table"):
         pasted = st.text_area("Paste the headings and rows from Excel or RokStats", key=f"paste_csv_{generation}",
                               placeholder="Paste here, then press Ctrl+Enter to preview.")
@@ -563,9 +594,17 @@ def report_import(scored):
     grouped = {}
     using_today = set()
     weekly_ids = []
+    member_scan = None
     today = db.report_today()
     for idx, (name, data) in enumerate(files):
         try:
+            if name.lower().startswith("ods1-members-") or data[:40].decode("utf-8-sig", errors="ignore").lstrip('"').startswith("ODS1 Members"):
+                if member_scan is not None and member_scan != data:
+                    raise ValueError("Choose one current member scan for this import.")
+                captured, members = membership.parse(data)
+                member_scan = data
+                preview.write(f"**Current ODS1 members** · {captured:%d %b %Y} · {len(members):,} governors")
+                continue
             frame = db.prepare_file(name, data)
             guess = db.guess_type(name, frame)
             if guess is None:
@@ -577,7 +616,8 @@ def report_import(scored):
                 if len(files) > 1:
                     st.text(name)
                 left, right = st.columns(2)
-                kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}")
+                kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}",
+                                      format_func=lambda k: "Weekly ODS1 activity" if k == db.WEEK else k)
                 day = right.date_input("Report end date", value=detected_day or today, key=f"date_{key}") or detected_day or today
             if day > today:
                 raise ValueError(f"{name} is dated {day}, which is in the future. Check the date in Import options.")
@@ -608,7 +648,8 @@ def report_import(scored):
         if (end, kind) in using_today:
             date_text += " (using today)"
         unit = "governor" if len(rows) == 1 else "governors"
-        preview.write(f"**{kind}** · {date_text} · {len(rows):,} {unit}")
+        report_label = "Weekly ODS1 activity" if kind == db.WEEK else kind
+        preview.write(f"**{report_label}** · {date_text} · {len(rows):,} {unit}")
         if len(parts) == 2:
             preview.caption("Basic and Advanced matched by Governor ID.")
 
@@ -618,19 +659,20 @@ def report_import(scored):
         with options:
             selection = sorted((slot, sorted(parts)) for slot, parts in grouped.items())
             option_key = hashlib.sha256(repr((generation, selection)).encode()).hexdigest()[:16]
-            full = st.checkbox("Mark missing governors as having left (complete weekly rosters only)", key=f"full_{option_key}")
-            restore = st.checkbox("Restore the saved rank for returners", value=True, key=f"restore_{option_key}")
-            auto = st.checkbox("Apply suggested ranks on import", key=f"auto_{option_key}")
+            full = st.checkbox("Replace the participant list for each complete weekly report", key=f"full_{option_key}")
+            restore = st.checkbox("Restore prior report ranks for returning participants", value=True, key=f"restore_{option_key}")
+            if member_scan is None and not any(r.get("membership_date") for r in scored):
+                auto = st.checkbox("Apply suggested ranks on import", key=f"auto_{option_key}")
         if full and len(weekly_ids) == 1:
             leaving = sum(bool(r.get("in_active_126")) and r["id"] not in weekly_ids[0] for r in scored)
-            preview.caption(f"{leaving} currently active governors are absent from this weekly file.")
+            preview.caption(f"{leaving} previous activity participants are absent from this weekly file.")
         elif full:
-            preview.caption("Each weekly file will be treated as a complete roster.")
-    action.button("Import", type="primary", key="run_import", on_click=commit_import, args=(batches, full, restore, auto))
+            preview.caption("Each weekly file supplies a complete activity participant list.")
+    action.button("Import", type="primary", key="run_import", on_click=commit_import, args=(batches, full, restore, auto, member_scan))
 
 
 def briefing(scored, phase):
-    active = [r for r in scored if r["in_active_126"]]
+    active = [r for r in scored if db.is_member(r)]
     parts = [f"ODS1 • Kingdom 4161 | {phase}", f"Weekly officer review · {len(active)} active governors", ""]
     for action in db.ACTIONS:
         names = sorted((r["name"] for r in active if r["action"] == action), key=str.casefold)
@@ -698,10 +740,14 @@ def main():
     st.session_state.rules = rules
     scored = [{**r, **db.classify(r, rules), "held": db.saved_rank(r)} for r in records]
     latest = db.latest_week(records)
-    label = (db.iso_day(latest).strftime("%d %b %Y") if latest and db.iso_day(latest) else ("No weekly reports" if clean_exists and dataset == "Clean reports" else "Saved baseline"))
+    membership_day = next((r["membership_date"] for r in records if r.get("membership_date")), None)
+    source_day = db.iso_day(membership_day or latest)
+    label = source_day.strftime("%d %b %Y") if source_day else "No dated report"
     html('<div class="mast"><div class="identity"><div class="sigil" aria-hidden="true"><span>O1</span></div><div>'
          '<div class="overline">Odyssey 1 &nbsp; / &nbsp; Kingdom 4161</div><h1>Alliance command</h1></div></div>'
-         f'<div class="stamp"><small>Roster source</small><strong>{esc(label)}</strong><span>{esc(phase)} · KvK 1</span></div></div>')
+         f'<div class="stamp"><small>{"ODS1 Members scan" if membership_day else "Weekly activity"}</small><strong>{esc(label)}</strong><span>{esc(phase)} · KvK 1</span></div></div>')
+    if records and not membership_day:
+        st.info("This data set shows weekly report participants. Upload an ODS1 Members scan to verify current membership.")
     if "notice" in st.session_state:
         st.success(st.session_state.pop("notice"))
     if pending:

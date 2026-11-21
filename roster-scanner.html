@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ODS1 roster scanner</title>
+<style>
+  html { color-scheme: dark; background: #10151a; color: #f2f0e9; font: 17px/1.6 system-ui, sans-serif; }
+  main { max-width: 36rem; margin: 12vh auto; padding: 0 1.25rem; }
+  h1 { font: 2.3rem Georgia, serif; }
+  a { color: #eed08b; }
+  #scanner { display: inline-block; background: #e5bd68; color: #211d13; padding: .5rem 1rem; border-radius: .4rem; font-weight: 650; }
+</style>
+<main>
+  <h1>ODS1 roster scanner</h1>
+  <p>Drag this bookmark to your bookmarks bar once.</p>
+  <a id="scanner" draggable="true">Scan ODS1 members</a>
+  <p>Open <a href="https://app.rokstats.online/guilds/overview/8843313">ODS1 on RokStats</a>, select <b>Members</b> in English and click the bookmark. It saves a CSV with each governor’s ID, name and alliance rank.</p>
+  <p>Drop that CSV into <b>Officer desk → Import reports</b> in the ODS1 dashboard.</p>
+</main>
+<script>
+async function scanODS1() {
+  try {
+    if (location.origin !== "https://app.rokstats.online" || location.pathname.replace(/\/$/, "") !== "/guilds/overview/8843313") {
+      throw Error("Open the ODS1 Members page on RokStats before scanning.");
+    }
+    const roles = {"Alliance Leader": "R5", "Leader": "R5", "Officer": "R4"};
+    const visible = el => Boolean(el.getClientRects().length && el.innerText.trim());
+    function groups() {
+      return Array.from(document.querySelectorAll("button")).filter(visible).flatMap(button => {
+        const match = button.innerText.trim().match(/^(Alliance Leader|Leader|Officer|R[1-5])\s*\((\d+)\)/i);
+        return match ? [{rank: roles[match[1]] || match[1], count: Number(match[2]), button}] : [];
+      });
+    }
+    const totalOnPage = () => Number(document.body.innerText.match(/^\s*(\d+) members\s*$/im)?.[1]);
+    const expected = totalOnPage();
+    const sections = groups();
+    const search = document.querySelector('input[placeholder="Search by name or ID..."]');
+    if (search?.value.trim() || !expected || !sections.length || sections.reduce((sum, g) => sum + g.count, 0) !== expected) {
+      throw Error("Open the Members tab in English and clear the member search, then scan again.");
+    }
+    function readRank(rank) {
+      const rows = new Map();
+      for (const link of document.querySelectorAll('a[href^="/governor/"]')) {
+        if (!visible(link)) continue;
+        const gid = link.getAttribute("href").match(/^\/governor\/(\d+)\/?$/)?.[1];
+        const badge = link.parentElement.innerText.split("\n").map(s => s.trim()).find(s => /^(Leader|R[1-5])$/.test(s));
+        if (gid && (roles[badge] || badge) === rank) rows.set(gid, [gid, link.innerText.trim(), rank]);
+      }
+      return rows;
+    }
+    const members = new Map();
+    for (const {rank, count} of sections) {
+      let rows = readRank(rank);
+      if (rows.size !== count) {
+        groups().find(g => g.rank === rank)?.button.click();
+        for (let attempt = 0; attempt < 60 && rows.size !== count; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          rows = readRank(rank);
+        }
+      }
+      if (rows.size !== count) throw Error(`Read ${rows.size} of ${count} ${rank} members. Clear the search and run the scan again.`);
+      for (const [gid, row] of rows) members.set(gid, row);
+    }
+    if (members.size !== expected || totalOnPage() !== expected) throw Error("The roster changed during the scan. Run it again.");
+    const stamp = new Date().toISOString();
+    const csvCell = s => '"' + String(s).replaceAll('"', '""') + '"';
+    const lines = [["ODS1 Members", "8843313", stamp, expected], ["Governor ID", "Player", "Alliance rank"], ...members.values()];
+    const file = new Blob(["\ufeff" + lines.map(row => row.map(csvCell).join(",")).join("\r\n") + "\r\n"], {type: "text/csv;charset=utf-8"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(file);
+    link.download = "ODS1-members-" + stamp.replaceAll(":", "-") + ".csv";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 30000);
+  } catch (error) {
+    alert(error.message);
+  }
+}
+document.querySelector("#scanner").href = "javascript:void(" + encodeURIComponent("(" + scanODS1.toString() + ")()") + ")";
+</script>
+</html>

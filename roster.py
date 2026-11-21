@@ -18,6 +18,8 @@ import pandas as pd
 from filelock import FileLock
 from xlrd.biffh import XLRDError
 
+import membership
+
 REPO_DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR = Path(os.environ.get("ODS1_DATA_DIR") or REPO_DATA_DIR).expanduser()
 # The confirmed 04:08 roster supersedes both published versions of the 03:14 report.
@@ -48,6 +50,8 @@ COMMAND = {
     233190616: ("R4", "Officer"),
     233184542: ("R4", "Envoy"),
 }
+# Ranks explicitly supplied by an officer in addition to the Nov 20 roster.
+OFFICER_CORRECTIONS = {233185199: "R4", 233183034: "R4"}
 WEEK, LIFETIME, WAR = "Weekly ODS1 roster", "All-time ODS1 activity", "Kingdom 4161 KvK"
 BASE_LABEL = "Saved baseline"
 ALREADY_IMPORTED = "These files are already reflected in this report."
@@ -116,7 +120,13 @@ def report_today():
     return datetime.now(ZoneInfo("Asia/Tbilisi")).date()
 
 
+def is_member(rec):
+    return rec.get("current_member", rec.get("in_active_126", False))
+
+
 def saved_rank(rec):
+    if rec.get("roster_rank"):
+        return rank_code(rec.get("officer_rank")) or OFFICER_CORRECTIONS.get(rec["id"]) or rec["roster_rank"]
     rank = rank_code(rec.get("officer_rank")) or rank_code(rec.get("rank"))
     if rec.get("in_active_126") and (rec.get("last_weekly_report") or "") >= COMMAND_AS_OF:
         if rec["id"] in COMMAND:
@@ -139,7 +149,7 @@ def former_rank(rec):
 
 
 def badge(rec, on_day):
-    if not rec.get("in_active_126"):
+    if not is_member(rec):
         return ""
     for field, label in (("returned_date", "Back on roster"), ("joined_date", "Joined")):
         observed = iso_day(rec.get(field))
@@ -150,7 +160,7 @@ def badge(rec, on_day):
 
 def classify(rec, rules=DEFAULT_RULES):
     phase, r3_cutoff, specialist = rules
-    active = bool(rec.get("in_active_126"))
+    active = bool(is_member(rec))
     support = round(
         min(n(rec.get("forts_7d")) / 200, 1) * 52
         + min(n(rec.get("tech_7d")) / 100000, 1) * 20
@@ -168,12 +178,18 @@ def classify(rec, rules=DEFAULT_RULES):
     previous = rank_code(rec.get("return_rank")) if rec.get("restore_this_report") else None
     previous = previous or former_rank(rec)
     gid = int(rec["id"])
+    command = COMMAND.get(gid)
+    if rec.get("roster_rank") and command and command[0] != held:
+        command = None
+    missing_week = rec.get("has_weekly_activity") is False
     if not active:
         proposed, reason = None, "Outside the current ODS1 roster"
-    elif gid in COMMAND or held in ("R4", "R5"):
-        proposed, reason = COMMAND[gid] if gid in COMMAND else (held, "Officer rank")
+    elif command or held in ("R4", "R5"):
+        proposed, reason = command or (held, "Officer rank")
     elif rec.get("is_excused"):
         proposed, reason = held or previous, "Excused by an officer"
+    elif missing_week:
+        proposed, reason = held, "Current guild member without a row in the latest weekly activity report"
     elif rec.get("restore_this_report") and previous:
         proposed, reason = previous, f"Returned to ODS1 · last held {previous}"
     elif overall >= r3_cutoff:
@@ -194,8 +210,12 @@ def classify(rec, rules=DEFAULT_RULES):
 
     if not active:
         action = None
-    elif rec.get("is_excused") or (held and (gid in COMMAND or (rec.get("restore_this_report") and previous == held))):
+    elif rec.get("is_excused") or (held and (command or held in ("R4", "R5"))):
         action = ACTIONS[0] if held else ACTIONS[3]
+    elif missing_week:
+        action = ACTIONS[3]
+    elif held and rec.get("restore_this_report") and previous == held:
+        action = ACTIONS[0]
     elif proposed == "Kick":
         action = ACTIONS[4]
     elif not held:
@@ -250,6 +270,8 @@ def read_records(directory=DATA_DIR):
     excused = {str(gid) for gid in legacy.get("excused_ids", [])}
     seen = set()
     for rec in records:
+        for field in ("current_member", "membership_date", "roster_rank", "has_weekly_activity"):
+            rec.pop(field, None)
         gid = int(rec["id"])
         if gid in seen:
             raise ValueError(f"The baseline repeats Governor ID {gid}.")
@@ -271,7 +293,8 @@ def change_records(mutation, directory=DATA_DIR):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / BASELINE
     with FileLock(str(path) + ".lock", timeout=15):
-        records, _ = load_live(directory)
+        _, members = current_membership(directory)
+        records, _ = load_report_records(directory, members)
         result = mutation(records)
         if result == ALREADY_IMPORTED and path.exists() and records == read_records(directory):
             return result
@@ -516,9 +539,19 @@ def apply_identity(rec, row, *, keep_current_name=False):
 
 
 def bucket_status(rec):
-    if rec.get("in_active_126"):
+    if is_member(rec):
         return "Active in ODS1"
+    if "current_member" in rec:
+        return "Outside the current ODS1 roster"
     return "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
+
+
+def apply_war_metrics(rec, row, position):
+    for source, dest in WAR_METRICS.items():
+        if row.get(source) is not None:
+            rec[dest] = row[source]
+    rec["in_kvk_4161"] = True
+    rec["kd_rank"] = row.get("kingdom rank") or position
 
 
 def imported_event(rec, report_day, kind):
@@ -613,13 +646,13 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                     rec.pop(field, None)
             if row.get("power") is not None and (kind == WEEK or not rec.get("in_active_126")):
                 rec["power"] = row["power"]
-            for source, dest in metrics.items():
-                if row.get(source) is not None:
-                    rec[dest] = row[source]
             if kind == WAR:
-                rec["in_kvk_4161"] = True
-                rec["kd_rank"] = row.get("kingdom rank") or position
-            elif kind == WEEK:
+                apply_war_metrics(rec, row, position)
+            else:
+                for source, dest in metrics.items():
+                    if row.get(source) is not None:
+                        rec[dest] = row[source]
+            if kind == WEEK:
                 rec.setdefault("period_start", {k: rec[k] for k in PERIOD_FIELDS if k in rec})
                 if gid not in was_active:
                     known = rec.get("first_seen_ods1") or rec.get("joined_date") or former_rank(rec) or any(h.get("in_active") and h.get("date") != report_day
@@ -708,7 +741,7 @@ def history_labels(records):
     return sorted(labels, key=lambda label: (iso_day(label) or date.min, label), reverse=True)
 
 
-def save_officer(records, gid, override, note, excused, expected):
+def save_officer(records, gid, override, note, excused, expected, *, scanned_rank=None):
     rec = next((r for r in records if r["id"] == gid), None)
     if rec is None:
         raise ValueError("This governor is no longer in the file. Refresh the roster.")
@@ -716,7 +749,7 @@ def save_officer(records, gid, override, note, excused, expected):
         raise ValueError("Another officer updated this governor. Reload the saved values before saving.")
     if override is not None and override not in RANKS:
         raise ValueError("Choose a valid rank.")
-    if override != rec.get("officer_rank") and gid in COMMAND and override not in (None, COMMAND[gid][0]):
+    if not scanned_rank and override != rec.get("officer_rank") and gid in COMMAND and override not in (None, COMMAND[gid][0]):
         raise ValueError("The command rank is locked.")
     rec.update(officer_rank=override, officer_note=note.strip(), is_excused=bool(excused))
     if rec.get("in_active_126") and saved_rank(rec):
@@ -757,12 +790,26 @@ def repository_reports(directory=DATA_DIR):
 
 
 
-def load_live(directory=DATA_DIR):
+def membership_folders(directory):
+    # Clean reports and the previous activity data set describe the same alliance.
+    return (DATA_DIR, REPO_DATA_DIR) if directory in (DATA_DIR, CLEAN_DATA_DIR) else (directory, None)
+
+
+def current_membership(directory):
+    return membership.latest(*membership_folders(directory))
+
+
+def load_report_records(directory, members):
     records = read_records(directory)
+    tracked = {r["id"] for r in records}
+    for gid in members.keys() - tracked:
+        records.append({"id": gid, "name": members[gid]["name"], "aliases": [], "history": [],
+                        "in_active_126": False, "in_kvk_4161": False, "is_new_joiner": False})
     pending = []
     scheduled = {}
     complete_days = set()
     saved_war_reports = {}
+    matching_war = None
     for path in repository_reports(directory):
         try:
             data = path.read_bytes()
@@ -804,6 +851,7 @@ def load_live(directory=DATA_DIR):
                                     for full in (False, True)}
                 upgrade_ranks = any(r.get("source_fingerprints", {}).get(WEEK) in old_fingerprints for r in records)
             if kind == WAR and latest == day.isoformat():
+                matching_war = (latest, path.name, frame)
                 war_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, None)).encode()).hexdigest()
                 if any(r.get("source_fingerprints", {}).get(WAR) == war_fingerprint for r in records):
                     saved_war_reports[day.isoformat()] = (path.name, digest, frame)
@@ -829,4 +877,41 @@ def load_live(directory=DATA_DIR):
             records = updated
         except ValueError as exc:
             pending.append(f"{label} · {exc}")
+    # A newly observed guild member can already be in a previously saved kingdom export.
+    missing = {r["id"]: r for r in records if r["id"] in members and not r.get("in_kvk_4161")}
+    latest_war = max((r.get("source_dates", {}).get(WAR, "") for r in records), default="")
+    if missing and latest_war and matching_war is None and directory == CLEAN_DATA_DIR:
+        source = REPO_DATA_DIR / f"Kingdom-4161-KvK-{latest_war}.csv"
+        if source.is_file():
+            matching_war = (latest_war, source.name, prepare_file(source.name, source.read_bytes()))
+    if missing and matching_war and matching_war[0] == latest_war:
+        label, name, frame = matching_war
+        for position, row in enumerate(report_data(name, frame, WAR), 1):
+            rec = missing.get(row["id"])
+            if rec is not None and (rec.get("source_dates", {}).get(WAR) or "") <= label:
+                apply_war_metrics(rec, row, position)
+                rec.setdefault("source_dates", {})[WAR] = label
+                if rec.get("power") is None:
+                    rec["power"] = row.get("power")
+    return records, pending
+
+
+def load_live(directory=DATA_DIR):
+    captured, members = current_membership(directory)
+    records, pending = load_report_records(directory, members)
+    if captured is None:
+        return records, pending
+    week = latest_week(records)
+    for rec in records:
+        member = members.get(rec["id"])
+        rec["current_member"] = member is not None
+        rec["membership_date"] = captured.date().isoformat()
+        if member:
+            rec["roster_rank"] = member["rank"]
+            apply_identity(rec, member)
+            rec["has_weekly_activity"] = any(h.get("date") == week and h.get("in_active") for h in rec["history"])
+            if not rec["has_weekly_activity"]:
+                for field in WEEK_METRICS.values():
+                    rec.pop(field, None)
+        rec["status"] = bucket_status(rec)
     return records, pending
