@@ -38,7 +38,7 @@ jobs:
                       return AppTest.from_file("app.py", default_timeout=60).run()
                   app = launch()
                   def check():
-                      assert not app.exception and not app.error, (app.exception, app.error)
+                      assert not app.exception and not app.error, ([e.message for e in app.exception], [e.value for e in app.error])
                   def cards():
                       return " ".join(x.proto.body for x in app.get("html"))
                   def select(label):
@@ -60,7 +60,7 @@ jobs:
                   for metric in ("T4 kills gained", "T5 kills gained"):
                       select("Rank fight by").set_value(metric).run()
                       check()
-                  next(x for x in app.text_input if x.label == "Fight name").input("Pass opening").run()
+                  next(x for x in app.text_input if x.label == "Fight name").input("Pass opening")
                   next(x for x in app.button if x.label == "Save fight").click().run()
                   check()
                   assert select("Fight").value == "Pass opening" and "66,182,926" in cards()
