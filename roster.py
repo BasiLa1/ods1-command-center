@@ -437,6 +437,8 @@ def report_data(name, data, kind, *, end=None, start=None):
         if col not in ("power diff", "trades") and (values < 0).any():
             raise ValueError(f"{name} contains a negative value in {col}.")
         frame[col] = values
+    if kind == WAR:
+        frame["scan_time"] = kvk_filename_time(name)
     if kind == WEEK:
         end = end or detect_report_day(name, frame)
         if end:
@@ -537,6 +539,12 @@ def apply_war_metrics(rec, row, position, day):
     rec.setdefault("kvk_scans", {})[day] = war_sample(row, power)
 
 
+def kvk_gains(before, after):
+    before, after = before or {}, after or {}
+    return {f"{key}_change": after[key] - before[key] if before.get(key) is not None and after.get(key) is not None else None
+            for key in ("dkp", "t4", "t5")}
+
+
 def kvk_comparison(records):
     """Use the same two distinct dates for everyone. Incomplete comparisons stay blank."""
     days = sorted({day for r in records for day in r.get("kvk_scans", {})}
@@ -546,11 +554,7 @@ def kvk_comparison(records):
     changes = {}
     for rec in records:
         scans = rec.get("kvk_scans", {})
-        new, old = scans.get(latest) or {}, scans.get(previous) or {}
-        changes[rec["id"]] = {
-            f"{key}_change": new[key] - old[key] if new.get(key) is not None and old.get(key) is not None else None
-            for key in ("dkp", "t4", "t5")
-        }
+        changes[rec["id"]] = kvk_gains(scans.get(previous), scans.get(latest))
     return previous, latest, changes
 
 
@@ -642,6 +646,7 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
             if not any(row["id"] in by_id for row in rows):
                 raise ValueError("The KvK export contains no governors tracked by ODS1.")
             for rec in records:
+                rec["kvk_capture"] = report_day + ("T" + rows[0]["scan_time"] if rows[0].get("scan_time") else "")
                 scans = rec.setdefault("kvk_scans", {})
                 prior_day = rec.get("source_dates", {}).get(WAR)
                 if prior_day:
@@ -800,6 +805,12 @@ def report_date_in_name(name):
     return max(dates_in_label(name), default=None)
 
 
+def kvk_filename_time(name):
+    stamp = re.search(r"(?<!\d)20\d{2}[-_]?\d{2}[-_]?\d{2}[ T_-]+"
+                      r"([01]\d|2[0-3])[:-]?([0-5]\d)[:-]?([0-5]\d)(?!\d)", name)
+    return ":".join(stamp.groups()) if stamp else ""
+
+
 def detect_report_day(name, frame):
     if "report end" in frame:
         ends = frame["report end"].dropna().unique()
@@ -950,8 +961,15 @@ def load_report_records(directory, members):
             digest = hashlib.sha256(data).hexdigest()
             if kind == WEEK and latest >= day.isoformat():
                 backfill_week_start(records, path.name, frame, day)
+            newer_capture = False
             if kind == WAR:
+                prior = war_sources.get(day.isoformat())
+                clock = kvk_filename_time(path.name)
+                if prior and (clock, path.name) < (kvk_filename_time(prior[0]), prior[0]):
+                    continue
                 war_sources[day.isoformat()] = (path.name, digest, frame)
+                stored = max((r.get("kvk_capture", "") for r in records), default="")
+                newer_capture = bool(clock and stored.startswith(day.isoformat() + "T") and clock > stored[11:])
             partial_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, False)).encode()).hexdigest()
             upgrade_partial = complete and any(r.get("source_fingerprints", {}).get(WEEK) == partial_fingerprint for r in records)
             upgrade_ranks = False
@@ -973,10 +991,13 @@ def load_report_records(directory, members):
                 war_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, None)).encode()).hexdigest()
                 if any(r.get("source_fingerprints", {}).get(WAR) == war_fingerprint for r in records):
                     saved_war_reports[day.isoformat()] = (path.name, digest, frame)
-            if latest > day.isoformat() or (latest == day.isoformat() and not (upgrade_partial or upgrade_ranks)):
+            if latest > day.isoformat() or (latest == day.isoformat() and not (upgrade_partial or upgrade_ranks or newer_capture)):
                 continue
             rows = report_data(path.name, frame, kind)
-            scheduled.setdefault(day.isoformat(), []).append((kind, digest, rows))
+            batch = scheduled.setdefault(day.isoformat(), [])
+            if kind == WAR:
+                batch[:] = [item for item in batch if item[0] != WAR]
+            batch.append((kind, digest, rows))
             if complete:
                 complete_days.add(day.isoformat())
         except (OSError, ValueError, ImportError) as exc:

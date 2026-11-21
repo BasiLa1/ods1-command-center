@@ -1,6 +1,8 @@
 """ODS1 Command Center. Start with streamlit run app.py from the repository."""
 import hashlib
 import json
+import sqlite3
+from collections import Counter
 import re
 from html import escape
 from pathlib import Path
@@ -11,6 +13,7 @@ from st_aggrid import AgGrid, JsCode
 from filelock import Timeout
 
 import roster as db
+import fights
 import membership
 from review_rules import FORTS_PER_DAY
 
@@ -386,6 +389,7 @@ def leaderboards_page(scored, scan_dates):
                         key=lambda r: (-db.n(r[field]), -db.n(r.get("kvk_dkp")), r["id"]))
         st.caption(f"{len(fighters)} of {len(active)} current members matched to KvK records · Ties sorted by DKP, then Governor ID.")
         kvk_dates_caption(scan_dates)
+        st.button("Open fight summaries", on_click=open_fights, key="leaderboard_fights")
         frame_table([
             {"Place": place, "Governor": r["name"], metric: r[field],
              **{label: r.get(column) for label, column in fields.items() if column != field},
@@ -407,9 +411,89 @@ def leaderboards_page(scored, scan_dates):
     ], "leaderboard", empty=f"This report has no values for {metric}.")
 
 
+def open_fights():
+    st.session_state.section = "KvK war"
+    st.session_state.war_view = "Fight summaries"
+
+
+def fight_page(scored):
+    directory = st.session_state.data_directory
+    if not any(r.get("membership_date") for r in scored):
+        st.info("Import an ODS1 Members scan to see fight results for the current alliance roster.")
+        st.button("Import reports", on_click=open_import, key="fight_members_import")
+        return
+    try:
+        scans, saved = fights.catalog(scored, directory)
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        st.error(f"Could not open the fight archive. {exc}")
+        return
+    ends = [key for key, scan in scans.items() if any(fights.precedes(s.stamp, scan.stamp) for s in scans.values())]
+    if not ends:
+        st.info("Import two KvK exports taken before and after the fight. For two scans on the same day, include both capture times.")
+        st.button("Import reports", on_click=open_import, key="fight_scans_import")
+        return
+
+    counts = Counter(s.stamp for s in scans.values())
+    def label(key):
+        stamp = scans[key].stamp
+        suffix = f" · {key[-6:]}" if counts[stamp] > 1 else ""
+        return fights.scan_label(stamp) + suffix
+
+    prefix = f"fight_{directory}"
+    key = prefix + "_choice"
+    if opened := st.session_state.pop(prefix + "_saved", None):
+        st.session_state[key] = opened
+    name = st.selectbox("Fight", [None, *saved], format_func=lambda v: v or "Choose scans", key=key)
+    if name is not None:
+        start, end = saved[name]
+        st.caption(f"{label(start)} → {label(end)}")
+    else:
+        left, right = st.columns(2)
+        end = right.selectbox("After the fight", ends, index=len(ends) - 1, format_func=label, key=prefix + "_end")
+        starts = [k for k, s in scans.items() if fights.precedes(s.stamp, scans[end].stamp)]
+        start = left.selectbox("Before the fight", starts, index=len(starts) - 1, format_func=label, key=prefix + "_start")
+
+    rows = fights.summary(scored, scans[start], scans[end])
+    fields = {"DKP gained": "dkp_change", "T4 kills gained": "t4_change", "T5 kills gained": "t5_change"}
+    matched = sum(row["in_both"] for row in rows)
+    cards = []
+    for heading, field in fields.items():
+        values = [row[field] for row in rows if row[field] is not None]
+        cards.append((heading, f"{sum(values):,.0f}" if values else "—", f"{len(values)} members with both readings"))
+    stats([*cards, ("In both scans", f"{matched}/{len(rows)}", "Current ODS1 members")])
+    st.caption("Gains cover all activity between the two scans. A blank means a reading is missing.")
+    metric = st.selectbox("Rank fight by", list(fields), key=prefix + "_metric")
+    field = fields[metric]
+    ranked = sorted(rows, key=lambda r: (r[field] is None, -db.n(r[field]), r["dkp_change"] is None,
+                                        -db.n(r["dkp_change"]), r["id"]))
+    table = [{"Governor": r["name"], metric: r[field], **{col: r[k] for col, k in fields.items() if k != field},
+              "Governor ID": r["id"]} for r in ranked]
+    frame_table([dict(row, Place=i) for i, row in enumerate(table, 1)], f"fight_results_{field}_{start}_{end}")
+    export = pd.DataFrame(table).assign(Fight=name or "", **{"Before scan": scans[start].stamp, "After scan": scans[end].stamp})
+    st.download_button("Download fight CSV", export.to_csv(index=False).encode("utf-8-sig"),
+                       f"ODS1-fight-{scans[start].stamp.replace(':', '')}_{scans[end].stamp.replace(':', '')}.csv", "text/csv")
+    if name is None:
+        with st.form(prefix + "_save"):
+            entered = st.text_input("Fight name", placeholder="Pass 4 opening", max_chars=80)
+            submit = st.form_submit_button("Save fight")
+        if submit:
+            try:
+                name = fights.save_fight(directory, entered, scans[start], scans[end])
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                st.error(str(exc))
+            else:
+                st.session_state[prefix + "_saved"] = name
+                st.session_state.notice = f"Saved {name} with these two scans."
+                st.rerun()
+
+
 def war_page(scored, scan_dates):
     fighters = [r for r in scored if db.is_member(r) and r.get("in_kvk_4161")]
     title("KvK war", "Kingdom 4161")
+    view = st.radio("War view", ("Kingdom totals", "Fight summaries"), horizontal=True, key="war_view")
+    if view == "Fight summaries":
+        fight_page(scored)
+        return
     stats([("Tracked fighters", len(fighters), "Current ODS1 members"),
            ("Combined DKP", compact(sum(db.n(r.get("kvk_dkp")) for r in fighters)), "Current members in the KvK report"),
            ("Kill points", compact(sum(db.n(r.get("kvk_kp")) for r in fighters)), "Recorded in the KvK export"),
@@ -566,18 +650,17 @@ def member_detail(scored, preferred=None, selected=None):
         frame_table(list(reversed(rows)), "governor_history")
 
 
-def commit_import(batches, full, restore, auto, member_scan=None):
+def commit_import(batches, full, restore, auto, member_scan=None, captures=()):
     messages = []
     try:
         directory = st.session_state.data_directory
         if member_scan is not None:
             messages.append(membership.save(member_scan, *db.membership_folders(directory)))
-        if batches:
-            messages.append(db.change_records(lambda records: db.merge_dated_reports(
-                records, batches, full, st.session_state.rules, restore, auto), directory=directory))
+        if batches or captures:
+            messages.append(fights.import_reports(directory, batches, captures, full, st.session_state.rules, restore, auto))
     except db.OlderReports as exc:
         st.session_state.import_info = str(exc)
-    except (ValueError, OSError, Timeout) as exc:
+    except (ValueError, OSError, sqlite3.Error, Timeout) as exc:
         st.session_state.import_error = str(exc)
     else:
         st.session_state.import_generation = st.session_state.get("import_generation", 0) + 1
@@ -627,6 +710,7 @@ def report_import(scored):
     grouped = {}
     using_today = set()
     weekly_ids = []
+    captures = []
     member_scan = None
     today = db.report_today()
     for idx, (name, data) in enumerate(files):
@@ -652,7 +736,11 @@ def report_import(scored):
                 kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}",
                                       format_func=lambda k: "Weekly ODS1 activity" if k == db.WEEK else k)
                 day = right.date_input("Report end date", value=detected_day or today, key=f"date_{key}") or detected_day or today
-                start = None
+                start = stamp = None
+                if kind == db.WAR:
+                    clock = st.text_input("Scan time (optional)", value=db.kvk_filename_time(name), key=f"clock_{key}",
+                                          placeholder="HH:MM:SS", help="Uses the time in the export filename. Same-day fight comparisons need both times.")
+                    stamp = fights.scan_stamp(day, clock)
                 if kind == db.WEEK:
                     start = st.date_input("Weekly report starts", value=db.detect_week_start(name, frame, day),
                                           key=f"start_{key}_{day}", help="Defaults to Monday when the export only gives an end date.")
@@ -663,7 +751,7 @@ def report_import(scored):
             preview.error(str(exc))
             return
 
-        slot = (day.isoformat(), kind)
+        slot = (day.isoformat(), kind, stamp)
         grouped.setdefault(slot, {}).setdefault(digest, (name, rows))
         if detected_day is None and day == today:
             using_today.add(slot)
@@ -672,20 +760,27 @@ def report_import(scored):
             if not db.ALL_TIME_LABEL.search(labels):
                 preview.caption("This export spans more than a week. Import as all-time totals if it covers ODS1’s full history.")
 
-    for (end, kind), parts in grouped.items():
+    for (end, kind, stamp), parts in grouped.items():
         try:
+            if kind == db.WAR and len(parts) > 1:
+                raise ValueError("These KvK exports have the same scan time. Set their capture times in Import options or choose one export.")
             digest, rows = db.combine_report_files(kind, parts)
         except ValueError as exc:
             preview.error(str(exc))
             return
-        batches.setdefault(end, []).append((kind, digest, rows))
+        if kind == db.WAR:
+            captures.append((stamp, digest, rows))
+        else:
+            batches.setdefault(end, []).append((kind, digest, rows))
         if kind == db.WEEK:
             weekly_ids.append({r["id"] for r in rows})
         date_text = db.iso_day(end).strftime("%d %b %Y")
         if kind == db.WEEK:
             start = db.iso_day(rows[0]["week_start"])
             date_text = f"{start:%d %b} – {date_text} · {(db.iso_day(end) - start).days + 1} days"
-        if (end, kind) in using_today:
+        if kind == db.WAR:
+            date_text = fights.scan_label(stamp)
+        if (end, kind, stamp) in using_today:
             date_text += " (using today)"
         unit = "governor" if len(rows) == 1 else "governors"
         report_label = "Weekly ODS1 activity" if kind == db.WEEK else kind
@@ -710,7 +805,7 @@ def report_import(scored):
             preview.caption(f"{leaving} previous activity participants are absent from this weekly file.")
         elif full:
             preview.caption("Each weekly file supplies a complete activity participant list.")
-    action.button("Import", type="primary", key="run_import", on_click=commit_import, args=(batches, full, restore, auto, member_scan))
+    action.button("Import", type="primary", key="run_import", on_click=commit_import, args=(batches, full, restore, auto, member_scan, captures))
 
 
 def briefing(scored, phase):
