@@ -5,11 +5,10 @@ import csv
 import hashlib
 import io
 import json
-import math
 import os
 import re
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from zipfile import BadZipFile
@@ -19,6 +18,7 @@ from filelock import FileLock
 from xlrd.biffh import XLRDError
 
 import membership
+from review_rules import PHASES, iso_day, low_week_streak, monday, n, overall_score, rank_band, support_score, war_score
 
 REPO_DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR = Path(os.environ.get("ODS1_DATA_DIR") or REPO_DATA_DIR).expanduser()
@@ -34,7 +34,6 @@ CLEAN_DATA_DIR = DATA_DIR / "clean-reports"
 LEGACY_STATE = "ods1_persistent_state.json"
 RANKS = ("R5", "R4", "R3", "R2", "R1")
 ACTIONS = ("Keep current rank", "Promote", "Demote", "Monitor / warn", "Kick", "Review suggested rank")
-PHASES = {"Early KvK": (0.55, 0.45), "Mid KvK": (0.50, 0.50), "Late KvK": (0.30, 0.70)}
 DEFAULT_RULES = ("Early KvK", 45.0, 55.0)
 COMMAND_AS_OF = "2026-11-20"
 COMMAND = {
@@ -58,7 +57,7 @@ ALREADY_IMPORTED = "These files are already reflected in this report."
 ALL_TIME_LABEL = re.compile(r"all[\s_.-]*time|life[\s_.-]*time", re.I)
 PERIOD_FIELDS = ("in_active_126", "rank", "last_active_rank", "restore_this_report", "return_rank", "first_seen_ods1",
                  "returned_date", "joined_date", "is_new_joiner", "forts_7d", "tech_7d", "helps_7d",
-                 "rss_7d", "build_7d", "rok_use_7d", "rok_act_7d")
+                 "rss_7d", "build_7d", "rok_use_7d", "rok_act_7d", "week_start", "week_open")
 REPORT_TYPES = (WEEK, LIFETIME, WAR)
 WEEK_METRICS = {
     "forts": "forts_7d", "tech": "tech_7d", "helps": "helps_7d", "build": "build_7d",
@@ -87,29 +86,15 @@ ALIASES = {
     "kingdom": "kingdom|kingdom id|kingdom number|kd", "alliance": "alliance|alliance tag",
     "joined": "joined date|join date|joined at|joined on|alliance join date",
     "last login": "last login|last login time",
+    "report start": "report start|report start date|start date|period start|period start date|date from",
     "report end": "report end|report end date|end date|period end|period end date|date to|report date",
 }
 COLUMN_NAMES = {alias: target for target, variants in ALIASES.items() for alias in variants.split("|")}
 
 
-def n(value):
-    try:
-        amount = float(str(value).replace(",", ""))
-    except (ValueError, TypeError):
-        return 0.0
-    return amount if math.isfinite(amount) else 0.0
-
-
 def rank_code(value):
     text = str(value or "").strip().upper().replace(" (ROTATED)", "")
     return text if text in RANKS else None
-
-
-def iso_day(value):
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except (TypeError, ValueError):
-        return None
 
 
 def utc_day():
@@ -159,21 +144,11 @@ def badge(rec, on_day):
 
 
 def classify(rec, rules=DEFAULT_RULES):
-    phase, r3_cutoff, specialist = rules
     active = bool(is_member(rec))
-    support = round(
-        min(n(rec.get("forts_7d")) / 200, 1) * 52
-        + min(n(rec.get("tech_7d")) / 100000, 1) * 20
-        + min(n(rec.get("build_7d")) / 90000, 1) * 20
-        + min(n(rec.get("helps_7d")) / 2500, 1) * 8, 1,
-    ) if active else n(rec.get("rok_use_all"))
-    power, dkp = n(rec.get("power")), n(rec.get("kvk_dkp"))
-    ratio = dkp / power if power > 0 else 0
-    target = 0.10 if power < 12e6 else 0.15 if power <= 20e6 else 0.22
-    war = round(min(ratio / target, 1) * 75 + min(n(rec.get("kvk_healed")) / 500000, 1) * 15
-                + min(n(rec.get("kvk_acclaim")) / 50000, 1) * 10, 1)
-    w_support, w_war = PHASES[phase]
-    overall = round(min(support * w_support + war * w_war, 100), 1)
+    end = iso_day(rec.get("last_weekly_report"))
+    support = support_score(rec, iso_day(rec.get("week_start")), end) if active else n(rec.get("rok_use_all"))
+    war = war_score(rec.get("power"), rec.get("kvk_dkp"), rec.get("kvk_healed"), rec.get("kvk_acclaim"))
+    overall = overall_score(support, war, rules[0])
     held = saved_rank(rec)
     previous = rank_code(rec.get("return_rank")) if rec.get("restore_this_report") else None
     previous = previous or former_rank(rec)
@@ -181,54 +156,41 @@ def classify(rec, rules=DEFAULT_RULES):
     command = COMMAND.get(gid)
     if rec.get("roster_rank") and command and command[0] != held:
         command = None
-    missing_week = rec.get("has_weekly_activity") is False
-    if not active:
-        proposed, reason = None, "Outside the current ODS1 roster"
-    elif command or held in ("R4", "R5"):
-        proposed, reason = command or (held, "Officer rank")
-    elif rec.get("is_excused"):
-        proposed, reason = held or previous, "Excused by an officer"
-    elif missing_week:
-        proposed, reason = held, "Current guild member without a row in the latest weekly activity report"
-    elif rec.get("restore_this_report") and previous:
-        proposed, reason = previous, f"Returned to ODS1 · last held {previous}"
-    elif overall >= r3_cutoff:
-        proposed, reason = "R3", f"Overall {overall:g} meets the R3 cutoff of {r3_cutoff:g}"
-    elif support >= specialist:
-        proposed, reason = "R3", f"Support specialist · {support:g} usefulness"
-    elif war >= 75:
-        proposed, reason = "R3", f"War specialist · {war:g} KvK"
-    elif overall >= 24 or support >= 30 or war >= 40:
-        proposed = "R2"
-        reason = (f"{overall:g} overall meets the core cutoff of 24" if overall >= 24 else
-                  f"{support:g} support meets the core cutoff of 30" if support >= 30 else
-                  f"{war:g} KvK meets the core cutoff of 40")
-    elif overall >= 12 or n(rec.get("rok_use_all")) >= 30:
-        proposed, reason = "R1", ("Veteran with a slow week" if overall < 12 else "Weekly score in the R1 band")
-    else:
-        proposed, reason = "Kick", f"{overall:g} overall (under 12) · {n(rec.get('rok_use_all')):g} lifetime (under 30)"
+    def decision(proposed, action, reason):
+        return dict(support=support, war=war, overall=overall, proposed=proposed, action=action, reason=reason)
 
     if not active:
-        action = None
-    elif rec.get("is_excused") or (held and (command or held in ("R4", "R5"))):
-        action = ACTIONS[0] if held else ACTIONS[3]
-    elif missing_week:
-        action = ACTIONS[3]
-    elif held and rec.get("restore_this_report") and previous == held:
-        action = ACTIONS[0]
-    elif proposed == "Kick":
-        action = ACTIONS[4]
-    elif not held:
-        action = "Review suggested rank"
-    elif proposed == "R1" and held == "R1":
-        action = ACTIONS[3]
-    elif proposed == held:
-        action = ACTIONS[0]
-    elif RANKS.index(proposed) < RANKS.index(held):
-        action = ACTIONS[1]
-    else:
-        action = ACTIONS[2]
-    return dict(support=support, war=war, overall=overall, proposed=proposed, action=action, reason=reason)
+        return decision(None, None, "Outside the current ODS1 roster")
+    if command or held in ("R4", "R5"):
+        proposed, reason = command or (held, "Officer rank")
+        return decision(proposed, "Keep current rank" if held else "Review suggested rank", reason)
+    if rec.get("is_excused"):
+        return decision(held or previous, "Keep current rank" if held else "Monitor / warn", "Excused by an officer")
+    if rec.get("has_weekly_activity") is False:
+        return decision(held, "Monitor / warn", "Current member missing from the weekly export. Check report coverage.")
+    if rec.get("restore_this_report") and previous:
+        return decision(previous, "Keep current rank" if held == previous else "Review suggested rank",
+                        f"Returned to ODS1 · last held {previous}")
+
+    proposed, reason = rank_band(overall, support, war, rec.get("rok_use_all"), rules)
+    if not held:
+        if proposed == "Kick":
+            return decision(None, "Monitor / warn", "Confirm the member’s current rank before reviewing activity.")
+        return decision(proposed, "Review suggested rank", reason)
+    if proposed == held:
+        return decision(held, "Keep current rank", reason)
+    if proposed != "Kick" and RANKS.index(proposed) < RANKS.index(held):
+        return decision(proposed, "Promote", reason)
+
+    streak = low_week_streak(rec, held, rules, end, RANKS)
+    if not streak:
+        return decision(held, "Keep current rank", f"Hold {held}. No completed week qualifies for a low-activity check-in.")
+    sunday = end - timedelta(days=(end.weekday() + 1) % 7)
+    if streak == 1:
+        return decision(held, "Monitor / warn", f"First low full week ending {sunday:%b %d}. Ask about barbarian or other KvK activity.")
+    lower = "Kick" if held == "R1" else RANKS[RANKS.index(held) + 1]
+    return decision(lower, "Kick" if lower == "Kick" else "Demote",
+                    f"Two low full weeks ending {sunday - timedelta(days=7):%b %d} and {sunday:%b %d}. Officer review required.")
 
 
 def snapshot(rec, rules, day):
@@ -241,7 +203,8 @@ def snapshot(rec, rules, day):
         "action": result["action"], "power": rec.get("power"), "forts_7d": rec.get("forts_7d"),
         "tech_7d": rec.get("tech_7d"), "build_7d": rec.get("build_7d"), "helps_7d": rec.get("helps_7d"),
         "rss_7d": rec.get("rss_7d"), "rok_act_7d": rec.get("rok_act_7d"), "rok_use_7d": rec.get("rok_use_7d"),
-        "kvk_dkp": rec.get("kvk_dkp"), "phase": rules[0],
+        "kvk_dkp": rec.get("kvk_dkp"), "phase": rules[0], "week_start": rec.get("week_start"), "week_open": rec.get("week_open", False),
+        "rok_use_all": rec.get("rok_use_all"), "is_excused": bool(rec.get("is_excused")),
     }
 
 
@@ -408,7 +371,7 @@ def prepare_file(name, data):
 def long_activity_period(name, frame):
     for label in [name, *frame.attrs.get("report_metadata", [])]:
         dates = dates_in_label(label)
-        if len(dates) >= 2 and (max(dates) - min(dates)).days > 7:
+        if len(dates) >= 2 and (max(dates) - min(dates)).days >= 7:
             return True
     return False
 
@@ -425,7 +388,7 @@ def guess_type(name, frame):
     return None
 
 
-def report_data(name, data, kind):
+def report_data(name, data, kind, *, end=None, start=None):
     frame = data if isinstance(data, pd.DataFrame) else prepare_file(name, data)
     if kind == WAR:
         if not {"dkp", "kp"} & set(frame):
@@ -474,6 +437,17 @@ def report_data(name, data, kind):
         if col not in ("power diff", "trades") and (values < 0).any():
             raise ValueError(f"{name} contains a negative value in {col}.")
         frame[col] = values
+    if kind == WEEK:
+        end = end or detect_report_day(name, frame)
+        if end:
+            start = start or detect_week_start(name, frame, end)
+            if not 0 <= (end - start).days < 7:
+                raise ValueError(f"{name} needs a weekly period of one to seven days. Check the dates in Import options.")
+            frame["week_start"] = start.isoformat()
+            # An export captured on Sunday still has part of the last day ahead of it.
+            stamp = re.search(r"(?<!\d)(20\d{6})[_-]\d{6}(?!\d)", name)
+            captured = report_date_in_name(stamp[1]) if stamp else None
+            frame["week_open"] = end.weekday() == 6 and (end == report_today() or captured == end)
     return frame.astype(object).where(frame.notna(), None).to_dict("records")
 
 
@@ -546,12 +520,38 @@ def bucket_status(rec):
     return "Rotated Out (In KD 4161)" if rec.get("in_kvk_4161") else "Departed / Inactive"
 
 
-def apply_war_metrics(rec, row, position):
+def war_sample(row, power):
+    sample = {key: row.get(key) for key in ("dkp", "t4", "t5")}
+    if n(power) > 0 and all(row.get(key) is not None for key in ("dkp", "healed", "acclaim")):
+        sample["score"] = war_score(power, row["dkp"], row["healed"], row["acclaim"])
+    return sample
+
+
+def apply_war_metrics(rec, row, position, day):
     for source, dest in WAR_METRICS.items():
         if row.get(source) is not None:
             rec[dest] = row[source]
     rec["in_kvk_4161"] = True
     rec["kd_rank"] = row.get("kingdom rank") or position
+    power = row["power"] if row.get("power") is not None else rec.get("power")
+    rec.setdefault("kvk_scans", {})[day] = war_sample(row, power)
+
+
+def kvk_comparison(records):
+    """Use the same two distinct dates for everyone. Incomplete comparisons stay blank."""
+    days = sorted({day for r in records for day in r.get("kvk_scans", {})}
+                  | {r["source_dates"][WAR] for r in records if r.get("source_dates", {}).get(WAR)})
+    latest = days[-1] if days else None
+    previous = days[-2] if len(days) >= 2 else None
+    changes = {}
+    for rec in records:
+        scans = rec.get("kvk_scans", {})
+        new, old = scans.get(latest) or {}, scans.get(previous) or {}
+        changes[rec["id"]] = {
+            f"{key}_change": new[key] - old[key] if new.get(key) is not None and old.get(key) is not None else None
+            for key in ("dkp", "t4", "t5")
+        }
+    return previous, latest, changes
 
 
 def imported_event(rec, report_day, kind):
@@ -578,8 +578,25 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
     available = {}
     for rec in records:
         available.update(rec.get("source_fingerprints") or {})
-    report_digests = {kind: hashlib.sha256(repr((report_day, digest, complete if kind == WEEK else None)).encode()).hexdigest()
-                      for kind, digest, _ in reports}
+    week_start = monday(day).isoformat()
+    week_open = day.weekday() == 6 and day == report_today()
+    report_digests = {}
+    for kind, digest, rows in reports:
+        fingerprint = (report_day, digest, complete if kind == WEEK else None)
+        if kind == WEEK and rows:
+            starts = {row.get("week_start") or week_start for row in rows}
+            if len(starts) != 1:
+                raise ValueError("Weekly rows must cover the same report period.")
+            week_start = starts.pop()
+            start = iso_day(week_start)
+            if not start or not 0 <= (day - start).days < 7:
+                raise ValueError("The weekly report must cover one to seven days ending on its report date.")
+            week_open = week_open or any(row.get("week_open") for row in rows)
+            if start != monday(day):
+                fingerprint += (week_start,)
+            if week_open:
+                fingerprint += ("in progress",)
+        report_digests[kind] = hashlib.sha256(repr(fingerprint).encode()).hexdigest()
     changed = sorted(
         (item for item in reports if available.get(item[0]) != report_digests[item[0]]),
         key=lambda item: REPORT_TYPES.index(item[0]),
@@ -621,8 +638,18 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                 if complete or rec["id"] in weekly_rows:
                     rec["restore_this_report"] = False
 
-        if kind == WAR and not any(row["id"] in by_id for row in rows):
-            raise ValueError("The KvK export contains no governors tracked by ODS1.")
+        if kind == WAR:
+            if not any(row["id"] in by_id for row in rows):
+                raise ValueError("The KvK export contains no governors tracked by ODS1.")
+            for rec in records:
+                scans = rec.setdefault("kvk_scans", {})
+                prior_day = rec.get("source_dates", {}).get(WAR)
+                if prior_day:
+                    scans.setdefault(prior_day, None)
+                scans[report_day] = None
+                rec["in_kvk_4161"] = False
+                for field in WAR_METRICS.values():
+                    rec.pop(field, None)
         metrics = {WEEK: WEEK_METRICS, LIFETIME: ALL_METRICS, WAR: WAR_METRICS}[kind]
         for position, row in enumerate(rows, start=1):
             gid = int(row["id"])
@@ -647,7 +674,7 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
             if row.get("power") is not None and (kind == WEEK or not rec.get("in_active_126")):
                 rec["power"] = row["power"]
             if kind == WAR:
-                apply_war_metrics(rec, row, position)
+                apply_war_metrics(rec, row, position, report_day)
             else:
                 for source, dest in metrics.items():
                     if row.get(source) is not None:
@@ -687,9 +714,12 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
             rec.setdefault("source_fingerprints", {})[kind] = report_digests[kind]
         if has_week and (complete or rec["id"] in weekly_rows):
             rec["last_weekly_report"] = report_day
+            rec["week_start"] = week_start
+            rec["week_open"] = week_open
             if rec.get("in_active_126"):
                 result = classify(rec, rules)
-                if auto and result["proposed"] in RANKS and not rec.get("officer_rank") and not rec.get("is_excused"):
+                if (auto and (result["action"] == "Promote" or (result["action"] == "Review suggested rank" and not saved_rank(rec)))
+                        and result["proposed"] in RANKS and not rec.get("officer_rank") and not rec.get("is_excused")):
                     rec["rank"] = result["proposed"]
                 if saved_rank(rec):
                     rec["last_active_rank"] = saved_rank(rec)
@@ -782,6 +812,18 @@ def detect_report_day(name, frame):
     return report_date_in_name(name)
 
 
+def detect_week_start(name, frame, end):
+    if "report start" in frame:
+        starts = frame["report start"].dropna().unique()
+        if len(starts) == 1 and (day := report_date_in_name(starts[0])):
+            return day
+    for label in [*frame.attrs.get("report_metadata", []), name]:
+        days = dates_in_label(label)
+        if len(days) >= 2 and end in days:
+            return min(days)
+    return monday(end)
+
+
 def repository_reports(directory=DATA_DIR):
     directories = (REPO_DATA_DIR, directory) if directory == DATA_DIR and directory != REPO_DATA_DIR else (directory,)
     paths = {p.name: p for folder in directories if folder.is_dir() for p in folder.iterdir()
@@ -799,6 +841,69 @@ def current_membership(directory):
     return membership.latest(*membership_folders(directory))
 
 
+def backfill_war_scans(records, sources, pending):
+    """Recover observations for older saved rosters and members first tracked after a scan."""
+    latest = max((r.get("source_dates", {}).get(WAR, "") for r in records), default="")
+    for day, (name, digest, frame) in sources.items():
+        needed = [r for r in records if day not in r.get("kvk_scans", {})]
+        if day > latest or not needed:
+            continue
+        fingerprint = hashlib.sha256(repr((day, digest, None)).encode()).hexdigest()
+        same_latest = day == latest and any(r.get("source_fingerprints", {}).get(WAR) == fingerprint for r in records)
+        try:
+            rows = {row["id"]: (i, row) for i, row in enumerate(report_data(name, frame, WAR), 1)}
+        except ValueError as exc:
+            warning = f"{name} · {exc}"
+            if warning not in pending:
+                pending.append(warning)
+            continue
+        if day < latest:
+            # A corrected upload can differ from the bundled file for that date.
+            known = [(r["id"], r["kvk_scans"][day]) for r in records if day in r.get("kvk_scans", {})]
+            if any((saved is None) != (gid not in rows)
+                   or (saved is not None and any(saved.get(k) != rows[gid][1].get(k) for k in ("dkp", "t4", "t5")))
+                   for gid, saved in known):
+                continue
+        for rec in needed:
+            position, row = rows.get(rec["id"], (None, None))
+            if day == latest and not same_latest:
+                if not row or not rec.get("in_kvk_4161") or not all(
+                    row.get(k) is not None and row[k] == rec.get(WAR_METRICS[k]) for k in ("dkp", "t4", "t5")
+                ):
+                    continue
+            if row is None:
+                rec.setdefault("kvk_scans", {})[day] = None
+                if same_latest:
+                    rec["in_kvk_4161"] = False
+                    for field in WAR_METRICS.values():
+                        rec.pop(field, None)
+            elif same_latest:
+                apply_war_metrics(rec, row, position, day)
+                rec.setdefault("source_dates", {})[WAR] = day
+                if rec.get("power") is None:
+                    rec["power"] = row.get("power")
+            else:
+                rec.setdefault("kvk_scans", {})[day] = war_sample(row, row.get("power"))
+
+
+def backfill_week_start(records, name, frame, day):
+    # Recover a legacy period only when its dated source agrees with the saved activity.
+    label = day.isoformat()
+    missing = [(r, h) for r in records for h in r.get("history", [])
+               if h.get("date") == label and h.get("in_active") and not h.get("week_start")]
+    if not missing:
+        return
+    rows = {row["id"]: row for row in report_data(name, frame, WEEK, end=day)}
+    for rec, entry in missing:
+        row = rows.get(rec["id"])
+        if row and all(row.get(k) == entry.get(WEEK_METRICS[k]) for k in ("forts", "tech", "build", "helps")):
+            entry["week_start"] = row["week_start"]
+            entry["week_open"] = row["week_open"]
+            if rec.get("last_weekly_report") == label:
+                rec.setdefault("week_start", row["week_start"])
+                rec.setdefault("week_open", row["week_open"])
+
+
 def load_report_records(directory, members):
     records = read_records(directory)
     tracked = {r["id"] for r in records}
@@ -809,8 +914,18 @@ def load_report_records(directory, members):
     scheduled = {}
     complete_days = set()
     saved_war_reports = {}
-    matching_war = None
-    for path in repository_reports(directory):
+    war_sources = {}
+    paths = repository_reports(directory)
+    # Use an archived kingdom scan when it accompanies a weekly report in this data set.
+    weekly_days = {report_date_in_name(p.name) for p in paths if "weekly" in p.name.lower()}
+    war_days = {report_date_in_name(p.name) for p in paths if "kvk" in p.name.lower()}
+    for folder in sorted({p.parent for p in paths}):
+        for path in sorted((folder / "archive").glob("*_KvK.csv"), reverse=True):
+            label = report_date_in_name(path.name)
+            if label in weekly_days - war_days:
+                paths.append(path)
+                war_days.add(label)
+    for path in paths:
         try:
             data = path.read_bytes()
             frame = prepare_file(path.name, data)
@@ -833,6 +948,10 @@ def load_report_records(directory, members):
             latest = max((r.get("source_dates", {}).get(kind, "") for r in records), default="")
             complete = kind == WEEK and path.name.lower().startswith("ods1-complete-weekly-")
             digest = hashlib.sha256(data).hexdigest()
+            if kind == WEEK and latest >= day.isoformat():
+                backfill_week_start(records, path.name, frame, day)
+            if kind == WAR:
+                war_sources[day.isoformat()] = (path.name, digest, frame)
             partial_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, False)).encode()).hexdigest()
             upgrade_partial = complete and any(r.get("source_fingerprints", {}).get(WEEK) == partial_fingerprint for r in records)
             upgrade_ranks = False
@@ -851,7 +970,6 @@ def load_report_records(directory, members):
                                     for full in (False, True)}
                 upgrade_ranks = any(r.get("source_fingerprints", {}).get(WEEK) in old_fingerprints for r in records)
             if kind == WAR and latest == day.isoformat():
-                matching_war = (latest, path.name, frame)
                 war_fingerprint = hashlib.sha256(repr((day.isoformat(), digest, None)).encode()).hexdigest()
                 if any(r.get("source_fingerprints", {}).get(WAR) == war_fingerprint for r in records):
                     saved_war_reports[day.isoformat()] = (path.name, digest, frame)
@@ -863,6 +981,13 @@ def load_report_records(directory, members):
                 complete_days.add(day.isoformat())
         except (OSError, ValueError, ImportError) as exc:
             pending.append(f"{path.name} · {exc}")
+    latest_war = max((r.get("source_dates", {}).get(WAR, "") for r in records), default="")
+    if latest_war and latest_war not in war_sources and directory == CLEAN_DATA_DIR:
+        source = REPO_DATA_DIR / f"Kingdom-4161-KvK-{latest_war}.csv"
+        if source.is_file():
+            data = source.read_bytes()
+            war_sources[latest_war] = (source.name, hashlib.sha256(data).hexdigest(), prepare_file(source.name, data))
+    backfill_war_scans(records, war_sources, pending)
     for label, batch in sorted(scheduled.items()):
         try:
             # Missing members only leave when an officer confirms a complete roster.
@@ -877,22 +1002,8 @@ def load_report_records(directory, members):
             records = updated
         except ValueError as exc:
             pending.append(f"{label} · {exc}")
-    # A newly observed guild member can already be in a previously saved kingdom export.
-    missing = {r["id"]: r for r in records if r["id"] in members and not r.get("in_kvk_4161")}
-    latest_war = max((r.get("source_dates", {}).get(WAR, "") for r in records), default="")
-    if missing and latest_war and matching_war is None and directory == CLEAN_DATA_DIR:
-        source = REPO_DATA_DIR / f"Kingdom-4161-KvK-{latest_war}.csv"
-        if source.is_file():
-            matching_war = (latest_war, source.name, prepare_file(source.name, source.read_bytes()))
-    if missing and matching_war and matching_war[0] == latest_war:
-        label, name, frame = matching_war
-        for position, row in enumerate(report_data(name, frame, WAR), 1):
-            rec = missing.get(row["id"])
-            if rec is not None and (rec.get("source_dates", {}).get(WAR) or "") <= label:
-                apply_war_metrics(rec, row, position)
-                rec.setdefault("source_dates", {})[WAR] = label
-                if rec.get("power") is None:
-                    rec["power"] = row.get("power")
+    if scheduled:
+        backfill_war_scans(records, war_sources, pending)
     return records, pending
 
 

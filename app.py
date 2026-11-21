@@ -12,12 +12,16 @@ from filelock import Timeout
 
 import roster as db
 import membership
+from review_rules import FORTS_PER_DAY
 
 
 VIEWS = ("Roster review", "Overview", "Activity", "Leaderboards", "KvK war", "Rotations", "Officer desk")
-PRIORITY = {"Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4, "Review suggested rank": 2}
+MISSING_STATS = "Missing weekly stats"
+REVIEW_FILTERS = (*db.ACTIONS, MISSING_STATS)
+PRIORITY = {MISSING_STATS: 5, "Promote": 0, "Demote": 1, "Monitor / warn": 2, "Kick": 3, "Keep current rank": 4, "Review suggested rank": 2}
 ACTION_STYLE = dict(zip(db.ACTIONS, ("keep", "promote", "demote", "monitor", "kick", "promote")))
-SHORT_ACTION = {"Keep current rank": "Keep", "Kick": "Kick review"}
+ACTION_STYLE[MISSING_STATS] = "missing"
+SHORT_ACTION = {"Keep current rank": "Keep", "Demote": "Demotion review", "Kick": "Kick review"}
 CSS = """
 <style>
 :root{--ink:#10151a;--panel:#192026;--line:#333b40;--paper:#f2f0e9;--muted:#a8b1b4;--gold:#e5bd68}
@@ -139,13 +143,13 @@ def open_import():
 
 def review_page(scored):
     active = [r for r in scored if db.is_member(r)]
-    counts = {action: sum(r["action"] == action for r in active) for action in db.ACTIONS}
+    counts = {action: sum(r["action"] == action for r in active) for action in REVIEW_FILTERS}
     scanned = any(r.get("membership_date") for r in scored)
     without_leader = sum(r.get("roster_rank") != "R5" for r in active)
     roster_detail = f"{without_leader} excluding the alliance leader" if scanned else "Latest weekly report"
     stats([("Active roster" if scanned else "Report participants", len(active), roster_detail),
            ("Rank suggestions", counts["Promote"] + counts["Demote"] + counts["Review suggested rank"], f'{counts["Promote"]} promote · {counts["Demote"]} demote · {counts["Review suggested rank"]} to review'),
-           ("Check-ins", counts["Monitor / warn"], "Monitor / warn queue"),
+           ("Check-ins", counts["Monitor / warn"], f'{counts[MISSING_STATS]} members missing weekly stats'),
            ("Kick review", counts["Kick"], "Officer decision required")])
     heading, upload = st.columns([4, 1])
     with heading:
@@ -158,9 +162,16 @@ def review_page(scored):
         matched = sum(r["id"] in participants for r in active)
         st.caption(f"{matched} of {len(active)} current members appear in the {db.iso_day(week):%b %d} activity report "
                    f"({len(participants)} governors in total).")
+    with st.expander("How weekly reviews work"):
+        st.write("Forts earn up to 15 support points, tech donations 35, building time 25 and helps 25. "
+                 "Targets scale with the days in the report. An average of 10 forts per day earns 10 points and 15 earns all 15.")
+        st.write("These exports omit normal barbarian kills. For a warning or demotion review, we check whether "
+                 "the member would still fall below their rank with full fort credit. One low Monday–Sunday week "
+                 "prompts a check-in. Two in a row prompt an officer review. Each week needs an activity row and a KvK scan "
+                 "covering that member.")
     a, b, c, d = st.columns([2.1, 1.3, 1, 1])
     query = a.text_input("Find a governor", placeholder="Name, alias or Governor ID", key="review_search")
-    action = b.selectbox("Decision", ("All decisions", *db.ACTIONS), key="action_filter")
+    action = b.selectbox("Decision", ("All decisions", *REVIEW_FILTERS), key="action_filter")
     rank = c.selectbox("Saved rank", ("All ranks", *db.RANKS, "Unrecorded"), key="rank_filter")
     target = d.selectbox("Suggested rank", ("All suggestions", *db.RANKS, "Kick"), key="target_filter")
     selected = [r for r in active if (target == "All suggestions" or r["proposed"] == target) and matches(r, query) and (action == "All decisions" or r["action"] == action)
@@ -282,6 +293,7 @@ def overview_page(scored):
             row[f"All-time · {metric}"] = activity_value(r, lifetime)
         row.update({f"KvK · {metric.upper() if metric in ('kp', 'dkp') else metric.title()}": r.get(field)
                     for metric, field in db.WAR_METRICS.items()})
+        row.update({f"KvK · {label}": r.get(field) for label, field in KVK_CHANGES.items()})
         rows.append(row)
     frame = pd.DataFrame(rows).set_index("Governor ID")
     # Include export-only fields such as gifts, goals and individual troop tiers.
@@ -347,20 +359,33 @@ def activity_page(scored):
     ], "activity_table", empty="No activity rows in this report.")
 
 
-def leaderboards_page(scored):
+KVK_CHANGES = {"DKP change": "dkp_change", "T4 kills change": "t4_change", "T5 kills change": "t5_change"}
+
+
+def kvk_dates_caption(scan_dates):
+    previous, latest = (db.iso_day(day) for day in scan_dates)
+    if previous and latest:
+        st.caption(f"Changes from {previous:%d %b %Y} to {latest:%d %b %Y}. A blank means a value is missing from one of the scans.")
+    elif latest:
+        st.caption(f"Latest scan · {latest:%d %b %Y}. Changes will appear after a second dated KvK scan.")
+
+
+def leaderboards_page(scored, scan_dates):
     title("Leaderboards")
     period = st.radio("Leaderboard", ("Weekly", "All-time", "KvK performance"), horizontal=True, key="leaderboards_period")
     if period == "KvK performance":
         active = [r for r in scored if db.is_member(r)]
         fighters = [r for r in active if r.get("in_kvk_4161")]
-        fields = {"KvK score / 100": "war", "DKP": "kvk_dkp", "Kill points": "kvk_kp",
-                  "T4 kills": "kvk_t4", "T5 kills": "kvk_t5", "Dead": "kvk_dead",
+        fields = {"KvK score / 100": "war", "DKP": "kvk_dkp", "DKP change": "dkp_change",
+                  "T4 kills": "kvk_t4", "T4 kills change": "t4_change",
+                  "T5 kills": "kvk_t5", "T5 kills change": "t5_change", "Kill points": "kvk_kp", "Dead": "kvk_dead",
                   "Healed": "kvk_healed", "Acclaim": "kvk_acclaim"}
         metric = st.selectbox("Rank by", list(fields), key="kvk_leaderboard_metric")
         field = fields[metric]
         ranked = sorted((r for r in fighters if r.get(field) is not None),
                         key=lambda r: (-db.n(r[field]), -db.n(r.get("kvk_dkp")), r["id"]))
         st.caption(f"{len(fighters)} of {len(active)} current members matched to KvK records · Ties sorted by DKP, then Governor ID.")
+        kvk_dates_caption(scan_dates)
         frame_table([
             {"Place": place, "Governor": r["name"], metric: r[field],
              **{label: r.get(column) for label, column in fields.items() if column != field},
@@ -382,16 +407,19 @@ def leaderboards_page(scored):
     ], "leaderboard", empty=f"This report has no values for {metric}.")
 
 
-def war_page(scored):
+def war_page(scored, scan_dates):
     fighters = [r for r in scored if db.is_member(r) and r.get("in_kvk_4161")]
     title("KvK war", "Kingdom 4161")
     stats([("Tracked fighters", len(fighters), "Current ODS1 members"),
            ("Combined DKP", compact(sum(db.n(r.get("kvk_dkp")) for r in fighters)), "Current members in the KvK report"),
            ("Kill points", compact(sum(db.n(r.get("kvk_kp")) for r in fighters)), "Recorded in the KvK export"),
            ("Troops healed", compact(sum(db.n(r.get("kvk_healed")) for r in fighters)), "Recorded in the KvK export")])
+    kvk_dates_caption(scan_dates)
     query = st.text_input("Find a fighter", placeholder="Name, alias or ID", key="war_search")
     fighters = sorted((r for r in fighters if matches(r, query)), key=lambda r: (-db.n(r.get("kvk_dkp")), r["id"]))
     frame_table([{"Governor": display_name(r), "KD rank": r.get("kd_rank"), "KvK / 100": r["war"], "DKP": r.get("kvk_dkp"),
+                  "DKP change": r["dkp_change"], "T4 kills": r.get("kvk_t4"), "T4 kills change": r["t4_change"],
+                  "T5 kills": r.get("kvk_t5"), "T5 kills change": r["t5_change"],
                   "Kill points": r.get("kvk_kp"), "Power": r.get("power"), "Healed": r.get("kvk_healed"),
                   "Acclaim": r.get("kvk_acclaim"), "Status": r.get("status")} for r in fighters], "war_table")
 
@@ -492,6 +520,11 @@ def member_detail(scored, preferred=None, selected=None):
     stats([("Overall", f'{rec["overall"]:.1f}' if has_week else "—", "Score out of 100"),
            ("Support", f'{rec["support"]:.1f}' if has_week else "—", "Alliance usefulness"),
            ("KvK", f'{rec["war"]:.1f}', "War contribution"), ("Power", compact(db.n(rec.get("power"))), "Recorded power")])
+    end = db.iso_day(rec.get("last_weekly_report"))
+    if has_week and end and rec.get("forts_7d") is not None:
+        start = db.iso_day(rec.get("week_start")) or db.monday(end)
+        cap = ((end - start).days + 1) * FORTS_PER_DAY
+        st.caption(f"{start:%d %b}–{end:%d %b} · {db.n(rec['forts_7d']):g} forts recorded · {cap} earns full fort credit (15 support points).")
     report_days = [day for h in rec.get("history", []) if h.get("in_active")
                    and (day := db.iso_day(h.get("date")))]
     first_report = min(report_days).strftime("%d %b %Y") if report_days else "No weekly record"
@@ -619,9 +652,13 @@ def report_import(scored):
                 kind = left.selectbox("Report type", db.REPORT_TYPES, index=db.REPORT_TYPES.index(guess), key=f"kind_{key}",
                                       format_func=lambda k: "Weekly ODS1 activity" if k == db.WEEK else k)
                 day = right.date_input("Report end date", value=detected_day or today, key=f"date_{key}") or detected_day or today
+                start = None
+                if kind == db.WEEK:
+                    start = st.date_input("Weekly report starts", value=db.detect_week_start(name, frame, day),
+                                          key=f"start_{key}_{day}", help="Defaults to Monday when the export only gives an end date.")
             if day > today:
                 raise ValueError(f"{name} is dated {day}, which is in the future. Check the date in Import options.")
-            rows = db.report_data(name, frame, kind)
+            rows = db.report_data(name, frame, kind, end=day, start=start)
         except (ValueError, OSError, ImportError) as exc:
             preview.error(str(exc))
             return
@@ -645,11 +682,16 @@ def report_import(scored):
         if kind == db.WEEK:
             weekly_ids.append({r["id"] for r in rows})
         date_text = db.iso_day(end).strftime("%d %b %Y")
+        if kind == db.WEEK:
+            start = db.iso_day(rows[0]["week_start"])
+            date_text = f"{start:%d %b} – {date_text} · {(db.iso_day(end) - start).days + 1} days"
         if (end, kind) in using_today:
             date_text += " (using today)"
         unit = "governor" if len(rows) == 1 else "governors"
         report_label = "Weekly ODS1 activity" if kind == db.WEEK else kind
         preview.write(f"**{report_label}** · {date_text} · {len(rows):,} {unit}")
+        if kind == db.WEEK and rows[0].get("week_open"):
+            preview.caption("Sunday was still in progress at export. This report can update scores and rankings. A completed week is needed for a rank warning.")
         if len(parts) == 2:
             preview.caption("Basic and Advanced matched by Governor ID.")
 
@@ -662,7 +704,7 @@ def report_import(scored):
             full = st.checkbox("Replace the participant list for each complete weekly report", key=f"full_{option_key}")
             restore = st.checkbox("Restore prior report ranks for returning participants", value=True, key=f"restore_{option_key}")
             if member_scan is None and not any(r.get("membership_date") for r in scored):
-                auto = st.checkbox("Apply suggested ranks on import", key=f"auto_{option_key}")
+                auto = st.checkbox("Apply promotions and fill unrecorded ranks on import", key=f"auto_{option_key}")
         if full and len(weekly_ids) == 1:
             leaving = sum(bool(r.get("in_active_126")) and r["id"] not in weekly_ids[0] for r in scored)
             preview.caption(f"{leaving} previous activity participants are absent from this weekly file.")
@@ -674,7 +716,7 @@ def report_import(scored):
 def briefing(scored, phase):
     active = [r for r in scored if db.is_member(r)]
     parts = [f"ODS1 • Kingdom 4161 | {phase}", f"Weekly officer review · {len(active)} active governors", ""]
-    for action in db.ACTIONS:
+    for action in REVIEW_FILTERS:
         names = sorted((r["name"] for r in active if r["action"] == action), key=str.casefold)
         parts.extend([f"{action} ({len(names)})", ", ".join(names) or "None", ""])
     return "\n".join(parts).strip()
@@ -738,7 +780,13 @@ def main():
             st.caption("R3 also qualifies at 75 KvK. R2 starts at 24 overall, 30 support or 40 KvK. R1 starts at 12 overall or 30 lifetime usefulness.")
     rules = (phase, cutoff, specialist)
     st.session_state.rules = rules
-    scored = [{**r, **db.classify(r, rules), "held": db.saved_rank(r)} for r in records]
+    previous_scan, latest_scan, changes = db.kvk_comparison(records)
+    scored = []
+    for rec in records:
+        result = db.classify(rec, rules)
+        if rec.get("has_weekly_activity") is False and result["action"] == "Monitor / warn" and not rec.get("is_excused"):
+            result["action"] = MISSING_STATS
+        scored.append({**rec, **result, **changes[rec["id"]], "held": db.saved_rank(rec)})
     latest = db.latest_week(records)
     membership_day = next((r["membership_date"] for r in records if r.get("membership_date")), None)
     source_day = db.iso_day(membership_day or latest)
@@ -769,9 +817,9 @@ def main():
     elif view == "Activity":
         activity_page(scored)
     elif view == "Leaderboards":
-        leaderboards_page(scored)
+        leaderboards_page(scored, (previous_scan, latest_scan))
     elif view == "KvK war":
-        war_page(scored)
+        war_page(scored, (previous_scan, latest_scan))
     elif view == "Rotations":
         rotations_page(scored)
     else:
