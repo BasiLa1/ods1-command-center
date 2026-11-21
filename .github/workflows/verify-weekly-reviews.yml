@@ -1,0 +1,55 @@
+name: Check weekly rank reviews
+on:
+  push:
+    branches: [verify-weekly-kvk-reviews]
+permissions:
+  contents: read
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Check Python, imports, roster decisions and KvK gains
+        run: |
+          python -m py_compile app.py roster.py review_rules.py
+          python -m unittest discover -s tests -v
+      - name: Open all changed Streamlit views
+        run: |
+          python - <<'PY'
+          from datetime import date
+          from unittest.mock import patch
+          from streamlit.testing.v1 import AppTest
+          import roster
+          with patch.object(roster, "report_today", return_value=date(2026, 11, 22)):
+              app = AppTest.from_file("app.py", default_timeout=60).run()
+              def check():
+                  assert not app.exception and not app.error, (app.exception, app.error)
+              check()
+              app.selectbox(key="action_filter").set_value("Missing weekly stats").run()
+              check()
+              assert any("of 4" in c.value for c in app.caption)
+              app.radio(key="section").set_value("Leaderboards").run()
+              app.radio(key="leaderboards_period").set_value("KvK performance").run()
+              for metric in ("DKP change", "T4 kills change", "T5 kills change"):
+                  app.selectbox(key="kvk_leaderboard_metric").set_value(metric).run()
+                  check()
+                  assert any("20 Nov 2026 to 21 Nov 2026" in c.value for c in app.caption)
+              app.radio(key="section").set_value("KvK war").run()
+              check()
+              app.radio(key="section").set_value("Overview").run()
+              check()
+              app.radio(key="section").set_value("Officer desk").run()
+              app.radio(key="officer_mode").set_value("Import reports").run()
+              check()
+              app.text_area(key="paste_csv_0").input("Report period: 2026-11-16 to 2026-11-21\nID,Player,Forts destroyed\n1,One,90").run()
+              check()
+              assert any("6 days" in m.value for m in app.markdown)
+              print("Roster review, all three KvK change rankings, war, overview and dated import verified.")
+          PY
