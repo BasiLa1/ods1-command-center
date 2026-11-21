@@ -1,0 +1,93 @@
+name: Verify ODS1 fight summaries
+on:
+  push:
+    branches: [verify-kvk-fight-summaries]
+permissions:
+  contents: read
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Check imports, fight archives and roster regressions
+        run: |
+          python -m py_compile app.py fights.py roster.py
+          python -m unittest discover -s tests -v
+      - name: Exercise the complete Streamlit fight workflow
+        run: |
+          python - <<'PY'
+          from datetime import date
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from unittest.mock import patch
+          import os
+          from streamlit.testing.v1 import AppTest
+          with TemporaryDirectory() as tmp:
+              os.environ["ODS1_DATA_DIR"] = tmp
+              import roster as db
+              import fights
+              with patch.object(db, "report_today", return_value=date(2026, 11, 23)):
+                  def launch():
+                      return AppTest.from_file("app.py", default_timeout=60).run()
+                  app = launch()
+                  def check():
+                      assert not app.exception and not app.error, (app.exception, app.error)
+                  def cards():
+                      return " ".join(x.proto.body for x in app.get("html"))
+                  def select(label):
+                      return next(s for s in app.selectbox if s.label == label)
+                  def stamps():
+                      records, pending = db.load_live()
+                      assert not pending, pending
+                      scans, _ = fights.catalog(records, Path(tmp))
+                      return {s.stamp: key for key, s in scans.items()}
+                  check()
+                  app.radio(key="section").set_value("KvK war").run()
+                  app.radio(key="war_view").set_value("Fight summaries").run()
+                  check()
+                  assert all(x in cards() for x in ["64,359,342", "14,811,078", "460,740", "123/123"])
+                  dates = stamps()
+                  select("Before the fight").set_value(dates["2026-11-15T16:49:51"]).run()
+                  check()
+                  assert "289,164,994" in cards()
+                  for metric in ("T4 kills gained", "T5 kills gained"):
+                      select("Rank fight by").set_value(metric).run()
+                      check()
+                  next(x for x in app.text_input if x.label == "Fight name").input("Pass opening").run()
+                  next(x for x in app.button if x.label == "Save fight").click().run()
+                  check()
+                  assert select("Fight").value == "Pass opening" and "66,182,926" in cards()
+                  assert any(b.label == "Download fight CSV" for b in app.get("download_button"))
+
+                  app.radio(key="section").set_value("Officer desk").run()
+                  app.radio(key="officer_mode").set_value("Import reports").run()
+                  uploader = app.get("file_uploader")[0]
+                  def export(clock, dkp):
+                      data = f"Governor ID,Governor Name,KD,Power,DKP,T4,T5\n233190616,BasiLa,4161,23000000,{dkp},{dkp},1\n"
+                      return (f"PlayersRanking_20261122_{clock}.csv", data.encode(), "text/csv")
+                  uploader.set_value([export("190000", 400), export("080000", 100)]).run()
+                  check()
+                  assert any("08:00:00" in m.value for m in app.markdown)
+                  assert any("19:00:00" in m.value for m in app.markdown)
+                  app.button(key="run_import").click().run()
+                  check()
+                  assert any("Saved 2 KvK fight scans" in x.value for x in app.success)
+                  app = launch()
+                  app.radio(key="section").set_value("Leaderboards").run()
+                  app.radio(key="leaderboards_period").set_value("KvK performance").run()
+                  app.button(key="leaderboard_fights").click().run()
+                  check()
+                  assert app.radio(key="war_view").value == "Fight summaries"
+                  assert "1/123" in cards() and "300" in cards()
+                  select("Fight").set_value("Pass opening").run()
+                  check()
+                  assert all(x in cards() for x in ["289,164,994", "66,182,926", "2,145,342", "123/123"])
+                  print("Verified selection, totals, all ranking controls, download, named fight persistence, two same-day uploads, and reopening from Leaderboards.")
+          PY
