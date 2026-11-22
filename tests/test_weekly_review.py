@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import roster as db
-from review_rules import support_score
+from review_rules import promotion_war, support_score
 
 
 def activity(gid=1, rank="R3", **extra):
@@ -84,6 +84,93 @@ class WeeklyReviewTests(unittest.TestCase):
         result = import_week(records, "2020-01-19", activity(rank="R2", tech=100000, build=90000, helps=2500))
         self.assertEqual((result["action"], result["proposed"]), ("Promote", "R3"))
 
+    def test_promotion_uses_earned_support_and_advances_only_one_rank(self):
+        fast_start = import_week([], "2020-01-06", activity(rank="R1", forts=15, tech=16000), war=False)
+        self.assertGreater(fast_start["support"], 30)  # The activity display still shows the daily pace.
+        self.assertEqual((fast_start["action"], fast_start["promotion_score"]), ("Keep current rank", 4.2))
+        for rank, next_rank in (("R1", "R2"), ("R2", "R3")):
+            with self.subTest(rank=rank):
+                forts_only = import_week([], "2020-01-08", activity(rank=rank, forts=500))
+                self.assertEqual((forts_only["action"], forts_only["proposed"]), ("Keep current rank", rank))
+                earned = activity(rank=rank, tech=100000, build=90000, helps=2500)
+                result = import_week([], "2020-01-06", earned, war=False)
+                self.assertEqual((result["action"], result["proposed"]), ("Promote", next_rank))
+                self.assertIn("KvK gains need two daily scans", result["reason"])
+
+    def test_only_kvk_gains_inside_the_activity_period_earn_promotion_credit(self):
+        records = []
+
+        def report(day, dkp):
+            member = activity(rank="R1")
+            scan = fighter(dkp=dkp, healed=500000, acclaim=50000)
+            db.merge_reports(records, [(db.WEEK, "activity", [member]), (db.WAR, str(dkp), [scan])], day, complete=True)
+            return db.classify(records[0])
+
+        report("2020-01-05", 0)
+        single = report("2020-01-06", 2000000)
+        self.assertEqual((single["war"], single["promotion_score"], single["action"]), (100, 0, "Keep current rank"))
+        flat = report("2020-01-08", 2000000)
+        self.assertIn("0 KvK from Jan 06–Jan 08 gains", flat["reason"])
+        gain = report("2020-01-09", 3000000)
+        self.assertEqual((gain["action"], gain["proposed"], gain["promotion_score"]), ("Promote", "R2", 33.8))
+        corrected = report("2020-01-09", 2000000)
+        self.assertEqual(corrected["action"], "Keep current rank")
+        db.merge_reports(records, [(db.WAR, "next scan", [fighter(dkp=4000000)])], "2020-01-10")
+        self.assertEqual(db.classify(records[0])["promotion_score"], 0)
+        # A partial export for a different governor advances the global date, not this governor's activity.
+        db.merge_reports(records, [(db.WEEK, "other member", [activity(gid=2)])], "2020-01-10")
+        self.assertIsNone(db.classify(records[0])["promotion_score"])
+
+    def test_closed_week_comparison_handles_sparse_scans_joins_and_counter_resets(self):
+        start, end = date(2020, 1, 6), date(2020, 1, 12)
+        scans = {"2020-01-05": {"dkp": 1000000}, "2020-01-12": {"dkp": 2000000}}
+        rec = {"power": 10000000, "kvk_scans": scans}
+        self.assertEqual(promotion_war(rec, start, end)[0], 75)
+        self.assertEqual(promotion_war({**rec, "week_open": True}, start, end)[0], 0)
+        self.assertEqual(promotion_war({**rec, "joined_date": "2020-01-06"}, start, end)[0], 0)
+        scans["2020-01-08"] = {"dkp": 1750000}
+        self.assertEqual(promotion_war(rec, start, end)[0], 75)  # Adding a midweek scan preserves measured gains.
+        scans["2020-01-08"]["dkp"] = 100000  # Reset between the two endpoints.
+        scans["2020-01-12"].update(healed=500000, acclaim=50000)
+        self.assertIn("unavailable", promotion_war(rec, start, end)[1])
+        scans["2020-01-05"]["healed"] = 0
+        self.assertEqual(promotion_war(rec, start, end)[0], 15)
+
+    def test_an_accepted_promotion_cannot_repeat_in_the_same_week(self):
+        for path in ("auto", "officer", "reported"):
+            with self.subTest(path=path):
+                records = []
+                member = activity(rank="R1", tech=100000, build=90000, helps=2500)
+                result = import_week(records, "2020-01-06", member, auto=path == "auto")
+                if path == "auto":
+                    self.assertEqual((result["action"], db.saved_rank(records[0])), ("Keep current rank", "R2"))
+                elif path == "officer":
+                    db.save_officer(records, 1, "R2", "Reviewed", False, db.officer_values(records[0]), scanned_rank="R1")
+                    self.assertEqual(db.classify(records[0])["action"], "Keep current rank")
+                else:
+                    self.assertEqual(result["action"], "Promote")
+                member["rank"] = "R2"
+                same_week = import_week(records, "2020-01-08", member)
+                self.assertEqual((same_week["action"], same_week["proposed"]), ("Keep current rank", "R2"))
+                new_week = import_week(records, "2020-01-13", member)
+                self.assertEqual((new_week["action"], new_week["proposed"]), ("Promote", "R3"))
+
+    def test_old_scan_uses_the_officers_corrected_export_even_if_a_packaged_file_has_the_same_dkp(self):
+        day = "2020-01-08"
+        records = []
+        import_week(records, day, activity(rank="R1"), war=False)
+        corrected = fighter(dkp=1000000, healed=2000, acclaim=None)
+        db.merge_reports(records, [(db.WAR, "officer upload", [corrected])], day)
+        saved = records[0]["kvk_scans"][day]
+        for field in ("healed", "acclaim"):
+            del saved[field]
+        raw = b"ID,DKP,T4,T5,Power,Healed,Acclaim\n1,1000000,0,0,10000000,500000,50000\n"
+        warnings = []
+        db.backfill_war_scans(records, {day: ("kvk.csv", "packaged export", raw)}, warnings)
+        self.assertFalse(warnings)
+        self.assertEqual(saved["healed"], 2000)
+        self.assertIsNone(saved["acclaim"])
+
     def test_officer_excuses_new_members_and_rank_changes(self):
         records = []
         import_week(records, "2020-01-05", activity(rank="R2"))
@@ -149,6 +236,17 @@ class WeeklyReviewTests(unittest.TestCase):
             self.assertEqual((prev, latest), ("2026-11-20", "2026-11-21"))
             self.assertEqual(changes[233190616], {"dkp_change": 636748, "t4_change": 127502, "t5_change": 12077})
             self.assertTrue(all(all(v is not None for v in changes[r["id"]].values()) for r in current))
+            decisions = {r["id"]: db.classify(r) for r in current}
+            self.assertTrue(any(result["action"] == "Promote" for result in decisions.values()))
+            for r in rows:
+                for sample in r.get("kvk_scans", {}).values():
+                    if sample is not None:
+                        sample.pop("healed", None)
+                        sample.pop("acclaim", None)
+            (directory / db.BASELINE).write_text(json.dumps(rows))
+            upgraded, pending = db.load_live(directory)
+            self.assertFalse(pending)
+            self.assertEqual(decisions, {r["id"]: db.classify(r) for r in upgraded if db.is_member(r)})
             for r in rows:
                 r.pop("kvk_scans", None)
                 r.pop("week_start", None)

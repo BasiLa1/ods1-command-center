@@ -168,6 +168,9 @@ def review_page(scored):
     with st.expander("How weekly reviews work"):
         st.write("Forts earn up to 15 support points, tech donations 35, building time 25 and helps 25. "
                  "Targets scale with the days in the report. An average of 10 forts per day earns 10 points and 15 earns all 15.")
+        st.write("A governor can earn one rank increase per week. The promotion score uses support already earned toward seven-day "
+                 "targets and gains in DKP, troops healed and acclaim between daily KvK scans in the report. "
+                 "Support can qualify a member on its own. For a closed week, consecutive Sunday scans can also measure gains.")
         st.write("These exports omit normal barbarian kills. For a warning or demotion review, we check whether "
                  "the member would still fall below their rank with full fort credit. One low Monday–Sunday week "
                  "prompts a check-in. Two in a row prompt an officer review. Each week needs an activity row and a KvK scan "
@@ -179,8 +182,15 @@ def review_page(scored):
     target = d.selectbox("Suggested rank", ("All suggestions", *db.RANKS, "Kick"), key="target_filter")
     selected = [r for r in active if (target == "All suggestions" or r["proposed"] == target) and matches(r, query) and (action == "All decisions" or r["action"] == action)
                 and (rank == "All ranks" or (r["held"] or "Unrecorded") == rank)]
-    selected.sort(key=lambda r: (PRIORITY[r["action"]], -r["overall"] if r["action"] in ("Promote", "Keep current rank") else r["overall"],
-                                r["name"].casefold(), r["id"]))
+
+    def review_order(rec):
+        decision = rec["action"]
+        score = rec["promotion_score"] if decision == "Promote" else rec["overall"]
+        if decision in ("Promote", "Keep current rank"):
+            score = -score
+        return PRIORITY[decision], score, rec["name"].casefold(), rec["id"]
+
+    selected.sort(key=review_order)
     if not selected:
         st.info("No governors match these filters.")
         return
@@ -191,19 +201,22 @@ def review_page(scored):
     pages = (len(selected) + 14) // 15
     page = min(int(st.session_state.get("review_page", 1)), pages)
     start = (page - 1) * 15
+    showing_promotions = action == "Promote"
+    score_label = "Promotion score" if showing_promotions else "Overall"
     rows = []
     for number, rec in enumerate(selected[start:start + 15], start=start + 1):
         joined = db.badge(rec, db.report_today())
         tag = f'<span class="join-tag">{esc(joined)}</span>' if joined else ""
         decision = rec["action"]
         decision_label = f'Suggest {rec["proposed"]}' if decision == "Review suggested rank" else SHORT_ACTION.get(decision, decision)
-        score = f'{rec["overall"]:.1f}' if rec.get("has_weekly_activity", True) else "—"
+        value = rec["promotion_score"] if showing_promotions else rec["overall"]
+        score = f"{value:.1f}" if rec.get("has_weekly_activity", True) else "—"
         rows.append(f'<tr><td class="pos">{number}.</td><td><a target="_self" href="?governor={int(rec["id"])}">{esc(rec["name"])}</a>{tag}</td>'
                     f'<td class="rank-pair">{esc(rec["held"] or "—")}<i>→</i>{esc(rec["proposed"] or "—")}</td>'
                     f'<td><span class="chip {ACTION_STYLE[decision]}">{esc(decision_label)}</span></td>'
                     f'<td class="score score-col">{score}</td><td class="reason reason-col">{esc(rec["reason"])}</td></tr>')
     html('<div class="council-wrap"><table class="council"><thead><tr><th class="pos">#</th><th>Governor</th>'
-         '<th>Saved → suggested</th><th>Decision</th><th class="score-col">Overall</th><th class="reason-col">Reason</th>'
+         f'<th>Saved → suggested</th><th>Decision</th><th class="score-col">{score_label}</th><th class="reason-col">Reason</th>'
          '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>')
     a, b, c = st.columns([2.2, 1, 1])
     a.caption(f"{start + 1}–{min(start + 15, len(selected))} of {len(selected)} · Rank changes first")
@@ -217,6 +230,7 @@ def review_page(scored):
     csv_rows = [{"#": idx, "Governor ID": r["id"], "Governor": r["name"], "Saved rank": r["held"],
                  "Suggested rank": r["proposed"], "Decision": r["action"], "Reason": r["reason"],
                  "Overall": r["overall"] if r.get("has_weekly_activity", True) else None,
+                 "Promotion score": r["promotion_score"],
                  "Support": r["support"] if r.get("has_weekly_activity", True) else None,
                  "KvK": r["war"], "Officer note": r.get("officer_note", "")}
                 for idx, r in enumerate(selected, start=1)]
@@ -289,6 +303,7 @@ def overview_page(scored):
         row = {"Governor ID": r["id"], "Governor": r["name"],
                "RokStats rank": r.get("roster_rank"), "Saved rank": r["held"], "Suggested rank": r["proposed"], "Decision": r["action"],
                "Power": r.get("power"), "Overall": r["overall"] if r.get("has_weekly_activity", True) else None,
+               "Promotion score": r["promotion_score"],
                "Support": r["support"] if r.get("has_weekly_activity", True) else None, "KvK score": r["war"],
                "Officer note": r.get("officer_note"), "Excused": bool(r.get("is_excused"))}
         for metric, (weekly, lifetime) in ACTIVITY_FIELDS.items():
@@ -873,6 +888,7 @@ def main():
             cutoff = st.slider("R3 overall cutoff", 30.0, 75.0, 45.0, 1.0)
             specialist = st.slider("R3 support specialist", 40.0, 85.0, 55.0, 1.0)
             st.caption("R3 also qualifies at 75 KvK. R2 starts at 24 overall, 30 support or 40 KvK. R1 starts at 12 overall or 30 lifetime usefulness.")
+            st.caption("Promotion cutoffs use earned weekly support and measured KvK gains. The main KvK score uses season totals.")
     rules = (phase, cutoff, specialist)
     st.session_state.rules = rules
     previous_scan, latest_scan, changes = db.kvk_comparison(records)

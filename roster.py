@@ -18,7 +18,7 @@ from filelock import FileLock
 from xlrd.biffh import XLRDError
 
 import membership
-from review_rules import PHASES, iso_day, low_week_streak, monday, n, overall_score, rank_band, support_score, war_score
+from review_rules import PHASES, iso_day, low_week_streak, monday, n, overall_score, promotion_review, rank_band, support_score, war_score
 
 REPO_DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR = Path(os.environ.get("ODS1_DATA_DIR") or REPO_DATA_DIR).expanduser()
@@ -156,8 +156,11 @@ def classify(rec, rules=DEFAULT_RULES):
     command = COMMAND.get(gid)
     if rec.get("roster_rank") and command and command[0] != held:
         command = None
+    promotion_score = None
+
     def decision(proposed, action, reason):
-        return dict(support=support, war=war, overall=overall, proposed=proposed, action=action, reason=reason)
+        return dict(support=support, war=war, overall=overall, proposed=proposed, action=action,
+                    reason=reason, promotion_score=promotion_score)
 
     if not active:
         return decision(None, None, "Outside the current ODS1 roster")
@@ -177,10 +180,16 @@ def classify(rec, rules=DEFAULT_RULES):
         if proposed == "Kick":
             return decision(None, "Monitor / warn", "Confirm the member’s current rank before reviewing activity.")
         return decision(proposed, "Review suggested rank", reason)
+    if held in ("R1", "R2"):
+        latest = rec.get("source_dates", {}).get(WEEK) or ""
+        review_end = end if latest <= (rec.get("last_weekly_report") or "") else None
+        target, promotion_score, evidence = promotion_review(rec, held, review_end, rules)
+        if target != held:
+            return decision(target, "Promote", evidence)
+        if proposed in RANKS and RANKS.index(proposed) < RANKS.index(held):
+            return decision(held, "Keep current rank", evidence)
     if proposed == held:
         return decision(held, "Keep current rank", reason)
-    if proposed != "Kick" and RANKS.index(proposed) < RANKS.index(held):
-        return decision(proposed, "Promote", reason)
 
     streak = low_week_streak(rec, held, rules, end, RANKS)
     if not streak:
@@ -240,6 +249,12 @@ def read_records(directory=DATA_DIR):
             raise ValueError(f"The baseline repeats Governor ID {gid}.")
         seen.add(gid)
         rec["id"] = gid
+        latest_scan = rec.get("kvk_scans", {}).get(rec.get("source_dates", {}).get(WAR))
+        if (latest_scan is not None and rec.get("in_kvk_4161")
+                and all(latest_scan.get(k) == rec.get(WAR_METRICS[k]) for k in ("dkp", "t4", "t5"))):
+            for field in ("healed", "acclaim"):
+                if WAR_METRICS[field] in rec:
+                    latest_scan.setdefault(field, rec[WAR_METRICS[field]])
         key = str(gid)
         rec.setdefault("officer_note", legacy.get("notes", {}).get(key, ""))
         rec.setdefault("is_excused", key in excused)
@@ -523,7 +538,7 @@ def bucket_status(rec):
 
 
 def war_sample(row, power):
-    sample = {key: row.get(key) for key in ("dkp", "t4", "t5")}
+    sample = {key: row.get(key) for key in ("dkp", "t4", "t5", "healed", "acclaim")}
     if n(power) > 0 and all(row.get(key) is not None for key in ("dkp", "healed", "acclaim")):
         sample["score"] = war_score(power, row["dkp"], row["healed"], row["acclaim"])
     return sample
@@ -726,6 +741,8 @@ def merge_reports(records, reports, report_day, complete=False, rules=DEFAULT_RU
                 if (auto and (result["action"] == "Promote" or (result["action"] == "Review suggested rank" and not saved_rank(rec)))
                         and result["proposed"] in RANKS and not rec.get("officer_rank") and not rec.get("is_excused")):
                     rec["rank"] = result["proposed"]
+                    if result["action"] == "Promote":
+                        rec["promotion_applied"] = {"week": monday(day).isoformat(), "rank": rec["rank"]}
                 if saved_rank(rec):
                     rec["last_active_rank"] = saved_rank(rec)
             hist = rec.setdefault("history", [])
@@ -786,6 +803,10 @@ def save_officer(records, gid, override, note, excused, expected, *, scanned_ran
         raise ValueError("Choose a valid rank.")
     if not scanned_rank and override != rec.get("officer_rank") and gid in COMMAND and override not in (None, COMMAND[gid][0]):
         raise ValueError("The command rank is locked.")
+    held = saved_rank({**rec, "roster_rank": scanned_rank}) if scanned_rank else saved_rank(rec)
+    report_day = iso_day(rec.get("last_weekly_report"))
+    if report_day and held and override and RANKS.index(override) < RANKS.index(held):
+        rec["promotion_applied"] = {"week": monday(report_day).isoformat(), "rank": override}
     rec.update(officer_rank=override, officer_note=note.strip(), is_excused=bool(excused))
     if rec.get("in_active_126") and saved_rank(rec):
         rec["last_active_rank"] = saved_rank(rec)
@@ -856,7 +877,12 @@ def backfill_war_scans(records, sources, pending):
     """Recover observations for older saved rosters and members first tracked after a scan."""
     latest = max((r.get("source_dates", {}).get(WAR, "") for r in records), default="")
     for day, (name, digest, frame) in sources.items():
-        needed = [r for r in records if day not in r.get("kvk_scans", {})]
+        needed = []
+        for rec in records:
+            scans = rec.get("kvk_scans", {})
+            sample = scans.get(day)
+            if day not in scans or (sample is not None and not {"healed", "acclaim"}.issubset(sample)):
+                needed.append(rec)
         if day > latest or not needed:
             continue
         fingerprint = hashlib.sha256(repr((day, digest, None)).encode()).hexdigest()
@@ -871,8 +897,9 @@ def backfill_war_scans(records, sources, pending):
         if day < latest:
             # A corrected upload can differ from the bundled file for that date.
             known = [(r["id"], r["kvk_scans"][day]) for r in records if day in r.get("kvk_scans", {})]
+            fields = ("dkp", "t4", "t5", "healed", "acclaim")
             if any((saved is None) != (gid not in rows)
-                   or (saved is not None and any(saved.get(k) != rows[gid][1].get(k) for k in ("dkp", "t4", "t5")))
+                   or (saved is not None and any(saved[k] != rows[gid][1].get(k) for k in fields if k in saved))
                    for gid, saved in known):
                 continue
         for rec in needed:
@@ -882,6 +909,17 @@ def backfill_war_scans(records, sources, pending):
                     row.get(k) is not None and row[k] == rec.get(WAR_METRICS[k]) for k in ("dkp", "t4", "t5")
                 ):
                     continue
+                # A corrected upload owns the readings for its date, including any missing fields.
+                row = {key: rec.get(field) for key, field in WAR_METRICS.items()}
+                row["power"] = rec.get("power")
+            existing = rec.get("kvk_scans", {}).get(day)
+            if existing is not None:
+                if row and all(existing.get(k) == row.get(k) for k in ("dkp", "t4", "t5")):
+                    observed = war_sample(row, row.get("power"))
+                    if day == latest or (existing.get("score") is not None and observed.get("score") == existing["score"]):
+                        for field in ("healed", "acclaim"):
+                            existing.setdefault(field, observed[field])
+                continue
             if row is None:
                 rec.setdefault("kvk_scans", {})[day] = None
                 if same_latest:
