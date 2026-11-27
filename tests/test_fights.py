@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from datetime import date
@@ -120,10 +121,17 @@ class FightTests(unittest.TestCase):
 
     @patch.object(db, "report_today", return_value=date(2026, 11, 22))
     def test_published_scans_match_the_members_roster_and_full_interval(self, _today):
-        directory = db.REPO_DATA_DIR
-        records, pending = db.load_live(directory)
-        self.assertFalse(pending)
-        scans, _ = fights.catalog(records, directory)
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for name in ("membership/2026-11-21.csv", "ODS1-weekly-2026-11-09_to_2026-11-15.csv",
+                         "ODS1-complete-weekly-2026-11-16_to_2026-11-21.csv", "archive/2026-11-15_16-49-51_KvK.csv",
+                         "Kingdom-4161-KvK-2026-11-20.csv", "Kingdom-4161-KvK-2026-11-21.csv"):
+                target = directory / name
+                target.parent.mkdir(exist_ok=True)
+                shutil.copyfile(db.REPO_DATA_DIR / name, target)
+            records, pending = db.load_live(directory)
+            self.assertFalse(pending)
+            scans, _ = fights.catalog(records, directory)
         by_day = {s.stamp[:10]: s for s in scans.values()}
         for day, expected in (("2026-11-20", (64359342, 14811078, 460740)),
                               ("2026-11-15", (289164994, 66182926, 2145342))):
